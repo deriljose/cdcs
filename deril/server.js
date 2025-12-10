@@ -1,9 +1,11 @@
 const express = require('express');
 const https = require('https');
 const fs = require('fs');
+const cors = require('cors');
 const os = require('os');
 const { MongoClient } = require('mongodb');
 const { execFile } = require('child_process');
+
 require('dotenv').config(); // Load environment variables from .env file
 
 const app = express();
@@ -11,6 +13,9 @@ app.use(express.json());
 
 // Enable pretty-printing of JSON responses.
 // This will indent the JSON with 2 spaces, making it more readable.
+
+// Enable CORS for all routes
+app.use(cors());
 app.set('json spaces', 2);
 
 // MongoDB Atlas connection details
@@ -39,6 +44,10 @@ async function connectToDatabase() {
         process.exit(1);
     }
 }
+
+// --- In-Memory Command Queue ---
+// A simple queue to hold the next command for a client.
+let commandQueue = [];
 
 // --- Authentication Middleware ---
 // In a production environment, store these keys securely (e.g., environment variables, secret manager)
@@ -71,10 +80,29 @@ app.post('/message', async (req, res) => {
             const flaggedCollectionRef = db.collection('flagged');
             await flaggedCollectionRef.insertOne(doc);
             console.log('Flagged data inserted into MongoDB:', doc);
+            
+            // Check if there is a command waiting in the queue for a client.
+            if (commandQueue.length > 0) {
+                const command = commandQueue.shift(); // Get and remove the oldest command
+                const clientIdentifier = doc.mac_address || 'unknown';
+                console.log(`Sending command to client ${clientIdentifier}:`, command);
 
-            // Deletion is now handled by the client via its local helper service.
-            // The server's only responsibility is to log the flagged packages.
-            res.json({ reply: 'Message received and logged.' });
+                // Log the command assignment to the installation_logs collection
+                const logDoc = {
+                    timestamp: new Date().toISOString(),
+                    package: command.packageName,
+                    username: doc.username || 'unknown',
+                    mac_address: clientIdentifier
+                };
+                db.collection('installation_logs').insertOne(logDoc);
+                console.log('Installation assignment logged to MongoDB:', logDoc);
+
+                res.json(command); // Send command to the client
+            } else {
+                // Deletion is now handled by the client via its local helper service.
+                // The server's only responsibility is to log the flagged packages.
+                res.json({ reply: 'Message received and logged. No pending commands.' });
+            }
         } catch (e) {
             console.error('MongoDB error in /message:', e);
             res.status(500).json({ error: 'Failed to process message due to a database error.' });
@@ -83,6 +111,44 @@ app.post('/message', async (req, res) => {
         res.status(400).json({ error: 'Invalid msg_type provided.' });
     }
 });
+
+// Endpoint for the frontend to request a package installation on a client
+app.post('/api/install-package', requireApiKey, async (req, res) => {
+    const { packageName } = req.body;
+    if (!packageName) {
+        return res.status(400).json({ error: 'packageName is required.' });
+    }
+    // This endpoint now only queues the command. Logging happens when a client picks it up.
+    console.log(`Received install request for package: ${packageName}. Queuing command.`);
+    commandQueue.push({ msg_type: 2001, packageName: packageName });
+    res.status(202).json({ message: 'Install command queued successfully.' });
+});
+
+// Endpoint for clients to poll for commands without sending a report.
+app.post('/api/check-in', (req, res) => {
+    // This is a lightweight endpoint for clients to see if commands are available.
+    if (commandQueue.length > 0) {
+        const command = commandQueue.shift(); // Get and remove the oldest command
+        const clientIdentifier = req.body.mac_address || 'unknown';
+        console.log(`Sending command to polling client ${clientIdentifier}:`, command);
+
+        // Log the command assignment to the installation_logs collection
+        const logDoc = {
+            timestamp: new Date().toISOString(),
+            package: command.packageName,
+            username: req.body.username || 'unknown',
+            mac_address: clientIdentifier
+        };
+        db.collection('installation_logs').insertOne(logDoc);
+        console.log('Installation assignment logged to MongoDB:', logDoc);
+
+        res.json(command); // Send command to the client
+    } else {
+        // No commands are pending, just send a simple acknowledgement.
+        res.json({ reply: 'OK. No pending commands.' });
+    }
+});
+
 
 // --- Generic Read-Only Endpoint Factory ---
 // This function creates a protected, read-only endpoint for a given collection.
