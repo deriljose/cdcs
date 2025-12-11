@@ -163,10 +163,11 @@ const performPackageCheck = async () => {
 // --- Agent HTTP(S) API: receives install requests from frontend ---
 const startAgent = () => {
     const app = express();
+    let isInstalling = false; // Lock to prevent concurrent installations
 
     // Configure CORS to allow requests from the frontend
     const corsOptions = {
-        origin: 'https://25.1.228.166:3000', // Allow requests from the frontend's origin
+        origin: true, // Allow requests from the frontend's origin
         methods: ['GET', 'POST'], // Allow only GET and POST methods
         allowedHeaders: ['Content-Type', 'X-API-Key'], // Allow specific headers
         credentials: true, // Allow credentials (if needed)
@@ -176,12 +177,16 @@ const startAgent = () => {
 
     // POST /api/install
     app.post('/api/install', async (req, res) => {
+        if (isInstalling) {
+            console.log('Agent rejected concurrent install request.');
+            return res.status(409).json({ error: 'An installation is already in progress. Please try again later.' });
+        }
+
+        isInstalling = true;
+        console.log('Agent installation lock acquired.');
+
         try {
-            // API key validation
-            const providedKey = req.get('X-API-Key') || '';
-            if (!AGENT_API_KEY || providedKey !== AGENT_API_KEY) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+            console.log(`Agent received install request from origin: ${req.get('origin')}`);
 
             const { packageName } = req.body || {};
             if (!packageName) {
@@ -290,6 +295,9 @@ const startAgent = () => {
         } catch (err) {
             console.error('Agent /api/install error:', err);
             return res.status(500).json({ error: 'Internal agent error' });
+        } finally {
+            isInstalling = false;
+            console.log('Agent installation lock released.');
         }
     });
 

@@ -5,6 +5,7 @@ import "./download.css";
 const DownloadPage = () => {
     const [packages, setPackages] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [installing, setInstalling] = useState({});
     const [error, setError] = useState(null);
 
     // Configure API URL and API KEY via Vite env vars.
@@ -69,48 +70,36 @@ const DownloadPage = () => {
 
     // New flow: send install request directly to the client agent
     const installPackage = async (pkg) => {
-        const apiKey = API_KEY || "";
+        // Prevent re-clicking while an installation is in progress for this package
+        if (installing[pkg.name]) {
+            return;
+        }
+        setInstalling(prev => ({ ...prev, [pkg.name]: true }));
+        setError(null); // Clear previous errors before a new attempt
+
         // Determine client agent base URL:
         // If VITE_API_URL points to server (e.g. https://HOST:3000), assume client agent runs on same host but port 4001.
         let clientAgentBase = "";
+        let hostname = window.location.hostname;
+        let protocol = window.location.protocol;
+
         if (API_URL) {
             try {
                 const url = new URL(API_URL);
-                // Use port 4001 for agent unless explicitly present in env
-                url.port = process.env.NODE_ENV === "development" ? (url.port || "4001") : (url.port || "4001");
-                // use path root
-                url.pathname = "";
-                clientAgentBase = url.toString().replace(/\/$/, "");
+                hostname = url.hostname;
+                protocol = url.protocol;
             } catch (e) {
-                // fallback to origin with port 4001
-                try {
-                    const origin = window.location.origin;
-                    const u = new URL(origin);
-                    u.port = "4001";
-                    clientAgentBase = u.toString().replace(/\/$/, "");
-                } catch (_) {
-                    clientAgentBase = `http://localhost:4001`;
-                }
-            }
-        } else {
-            // If no server URL given, target local machine agent on port 4001
-            try {
-                const origin = window.location.origin;
-                const u = new URL(origin);
-                u.port = "4001";
-                clientAgentBase = u.toString().replace(/\/$/, "");
-            } catch (_) {
-                clientAgentBase = `http://localhost:4001`;
+                console.warn("Invalid API_URL, using window.location");
             }
         }
+
+        // Force port 4001
+        clientAgentBase = `${protocol}//${hostname}:4001`;
 
         const installEndpoint = `${clientAgentBase}/api/install`;
 
         try {
             const headers = { "Content-Type": "application/json" };
-            if (apiKey) {
-                headers["X-API-Key"] = apiKey;
-            }
 
             const res = await fetch(installEndpoint, {
                 method: "POST",
@@ -128,6 +117,8 @@ const DownloadPage = () => {
             alert(body.message || `Installation request for '${pkg.name}' accepted by client agent.`);
         } catch (e) {
             setError(`Failed to send installation request: ${e.message}`);
+        } finally {
+            setInstalling(prev => ({ ...prev, [pkg.name]: false }));
         }
     };
 
@@ -153,9 +144,9 @@ const DownloadPage = () => {
                                 <tr key={pkg._id || pkg.id || pkg.file || pkg.name}>
                                     <td>{pkg.name}</td>
                                     <td className="action-cell">
-                                        <button className="request-button install-button" onClick={() => installPackage(pkg)}>
+                                        <button className="request-button install-button" onClick={() => installPackage(pkg)} disabled={installing[pkg.name]}>
                                             <HardDriveDownload />
-                                            Install on Client
+                                            {installing[pkg.name] ? 'Installing...' : 'Install on Client'}
                                         </button>
                                     </td>
                                 </tr>
