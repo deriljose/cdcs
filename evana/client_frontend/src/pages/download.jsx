@@ -1,145 +1,171 @@
-// src/pages/download.jsx
 import React, { useEffect, useState } from 'react';
 import { HardDriveDownload } from 'lucide-react';
 import "./download.css";
 
 const DownloadPage = () => {
-	const [packages, setPackages] = useState([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState(null);
+    const [packages, setPackages] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-	// Configure API URL and API KEY via Vite env vars.
-	// default to relative endpoint so no .env changes are required:
-	const API_URL = import.meta.env.VITE_API_URL || "";
-	const API_KEY = import.meta.env.VITE_API_KEY || "";
+    // Configure API URL and API KEY via Vite env vars.
+    const API_URL = import.meta.env.VITE_API_URL || "";
+    const API_KEY = import.meta.env.VITE_API_KEY || "";
 
-	useEffect(() => {
-		const fetchPackages = async () => {
-			try {
-				setLoading(true);
-				setError(null); // Clear previous errors
+    useEffect(() => {
+        const fetchPackages = async () => {
+            try {
+                setLoading(true);
+                setError(null);
 
-				// With the Vite proxy configured, we can just use a relative path.
-				// Vite's dev server will forward requests starting with `/api` to the backend.
-				const candidates = ["/api/packages"];
+                const candidates = ["/api/packages"];
+                let lastErr = null;
+                let lastEndpoint = null;
+                for (const endpoint of candidates) {
+                    try {
+                        lastEndpoint = endpoint;
+                        console.info("Trying packages endpoint:", endpoint);
+                        const headers = { Accept: "application/json" };
+                        if (API_KEY) {
+                            headers.Authorization = `Bearer ${API_KEY}`;
+                            headers["X-API-Key"] = API_KEY;
+                        }
+                        const res = await fetch(endpoint, { headers });
 
-				let lastErr = null;
-				let lastEndpoint = null;
-				for (const endpoint of candidates) {
-					try {
-						lastEndpoint = endpoint;
-						console.info("Trying packages endpoint:", endpoint);
-						const headers = { Accept: "application/json" };
-						if (API_KEY) {
-							headers.Authorization = `Bearer ${API_KEY}`;
-							headers["X-API-Key"] = API_KEY;
-						}
-						const res = await fetch(endpoint, { headers });
+                        if (res.status === 404) {
+                            const body = await res.text().catch(() => "");
+                            lastErr = `404 from ${endpoint} (${body || res.statusText})`;
+                            console.warn(lastErr);
+                            continue;
+                        }
+                        if (!res.ok) {
+                            const body = await res.text().catch(() => "");
+                            throw new Error(`Error ${res.status} from ${endpoint}: ${body || res.statusText}`);
+                        }
+                        const data = await res.json();
+                        setPackages(data);
+                        return;
+                    } catch (fetchErr) {
+                        lastErr = fetchErr.message || String(fetchErr);
+                        console.warn(`Fetch failed for ${endpoint}:`, fetchErr);
+                    }
+                }
 
-						// record 404 body for debugging and try next candidate
-						if (res.status === 404) {
-							const body = await res.text().catch(() => "");
-							lastErr = `404 from ${endpoint} (${body || res.statusText})`;
-							console.warn(lastErr);
-							continue;
-						}
-						if (!res.ok) {
-							const body = await res.text().catch(() => "");
-							throw new Error(`Error ${res.status} from ${endpoint}: ${body || res.statusText}`);
-						}
-						const data = await res.json();
-						setPackages(data);
-						return;
-					} catch (fetchErr) {
-						lastErr = fetchErr.message || String(fetchErr);
-						console.warn(`Fetch failed for ${endpoint}:`, fetchErr);
-						// continue to next endpoint
-					}
-				}
+                throw new Error(`All endpoints failed. Last endpoint tried: ${lastEndpoint}. Last error: ${lastErr}`);
+            } catch (e) {
+                const help = [
+                    "Likely causes:",
+                    "• server.js is not running or not listening on the expected host/port",
+                    "• CORS or proxy prevents access when server is on different origin/port",
+                    "• server requires auth and returned 401/403 (inspect network tab).",
+                ].join(" ");
+                setError(`${e.message}. ${help}`);
+            } finally {
+                setLoading(false);
+            }
+        };
 
-				// If we reach here, all endpoints failed.
-				throw new Error(`All endpoints failed. Last endpoint tried: ${lastEndpoint}. Last error: ${lastErr}`);
-			} catch (e) {
-				// Provide helpful message in UI with exact endpoint and likely causes.
-				const help = [
-					"Likely causes:",
-					"• server.js is not running or not listening on the expected host/port",
-					"• server.js exposes a different route (check for /packages vs /api/packages)",
-					"• CORS or proxy prevents access when server is on different origin/port",
-					"• server requires auth and returned 401/403 (inspect network tab).",
-				].join(" ");
-				setError(`${e.message}. ${help}`);
-			} finally {
-				setLoading(false);
-			}
-		};
+        fetchPackages();
+    }, [API_URL, API_KEY]);
 
-		fetchPackages();
-	}, [API_URL, API_KEY]);
+    // New flow: send install request directly to the client agent
+    const installPackage = async (pkg) => {
+        const apiKey = API_KEY || "";
+        // Determine client agent base URL:
+        // If VITE_API_URL points to server (e.g. https://HOST:3000), assume client agent runs on same host but port 4001.
+        let clientAgentBase = "";
+        if (API_URL) {
+            try {
+                const url = new URL(API_URL);
+                // Use port 4001 for agent unless explicitly present in env
+                url.port = process.env.NODE_ENV === "development" ? (url.port || "4001") : (url.port || "4001");
+                // use path root
+                url.pathname = "";
+                clientAgentBase = url.toString().replace(/\/$/, "");
+            } catch (e) {
+                // fallback to origin with port 4001
+                try {
+                    const origin = window.location.origin;
+                    const u = new URL(origin);
+                    u.port = "4001";
+                    clientAgentBase = u.toString().replace(/\/$/, "");
+                } catch (_) {
+                    clientAgentBase = `http://localhost:4001`;
+                }
+            }
+        } else {
+            // If no server URL given, target local machine agent on port 4001
+            try {
+                const origin = window.location.origin;
+                const u = new URL(origin);
+                u.port = "4001";
+                clientAgentBase = u.toString().replace(/\/$/, "");
+            } catch (_) {
+                clientAgentBase = `http://localhost:4001`;
+            }
+        }
 
-	const installPackage = async (pkg) => {
-		const base = API_URL ? API_URL.replace(/\/+$/, "") : "";
-		const installEndpoint = `${base}/api/install-package`;
+        const installEndpoint = `${clientAgentBase}/api/install`;
 
-		try {
-			const headers = { "Content-Type": "application/json" };
-			if (API_KEY) {
-				headers.Authorization = `Bearer ${API_KEY}`;
-				headers["X-API-Key"] = API_KEY;
-			}
+        try {
+            const headers = { "Content-Type": "application/json" };
+            if (apiKey) {
+                headers["X-API-Key"] = apiKey;
+            }
 
-			const res = await fetch(installEndpoint, {
-				method: "POST",
-				headers,
-				body: JSON.stringify({ packageName: pkg.name }),
-			});
+            const res = await fetch(installEndpoint, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ packageName: pkg.name }),
+            });
 
-			if (!res.ok) {
-				const body = await res.text().catch(() => "");
-				throw new Error(`Error ${res.status} from ${installEndpoint}: ${body || res.statusText}`);
-			}
+            if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                throw new Error(`Error ${res.status} from ${installEndpoint}: ${body || res.statusText}`);
+            }
 
-			alert(`Installation request for '${pkg.name}' sent successfully! The next client to check in will attempt to install it.`);
-		} catch (e) {
-			setError(`Failed to send installation request: ${e.message}`);
-		}
-	};
+            const body = await res.json().catch(() => ({}));
+            // Install is executed by the client agent; agent will send a log to the central server after completion.
+            alert(body.message || `Installation request for '${pkg.name}' accepted by client agent.`);
+        } catch (e) {
+            setError(`Failed to send installation request: ${e.message}`);
+        }
+    };
 
-	return (
-		<div className="download-page">
-			<h1 className="page-title">Download Software</h1>
-			<p className="page-subtitle">Download available software packages from the server</p>
+    return (
+        <div className="download-page">
+            <h1 className="page-title">Download Software</h1>
+            <p className="page-subtitle">Download available software packages from the server</p>
 
-			{loading && <p>Loading packages…</p>}
-			{error && <p className="error">Error: {error}</p>}
+            {loading && <p>Loading packages…</p>}
+            {error && <p className="error">Error: {error}</p>}
 
-			{!loading && !error && (
-				<div className="table-container">
-					<table className="packages-table">
-						<thead>
-							<tr>
-								<th>Package Name</th>
-								<th>Install on Client</th>
-							</tr>
-						</thead>
-						<tbody>
-							{packages.map((pkg) => (
-								<tr key={pkg._id || pkg.id || pkg.file || pkg.name}>
-									<td>{pkg.name}</td>
-									<td className="action-cell">
-										<button className="request-button install-button" onClick={() => installPackage(pkg)}>
-											<HardDriveDownload />
-											Install on Client
-										</button>
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
-			)}
-		</div>
-	);
+            {!loading && !error && (
+                <div className="table-container">
+                    <table className="packages-table">
+                        <thead>
+                            <tr>
+                                <th>Package Name</th>
+                                <th>Install on Client</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {packages.map((pkg) => (
+                                <tr key={pkg._id || pkg.id || pkg.file || pkg.name}>
+                                    <td>{pkg.name}</td>
+                                    <td className="action-cell">
+                                        <button className="request-button install-button" onClick={() => installPackage(pkg)}>
+                                            <HardDriveDownload />
+                                            Install on Client
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
 };
 
 export default DownloadPage;
