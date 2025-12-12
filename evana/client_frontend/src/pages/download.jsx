@@ -6,7 +6,7 @@ const DownloadPage = () => {
     const [packages, setPackages] = useState([]);
     const [loading, setLoading] = useState(true);
     const [installing, setInstalling] = useState({});
-    const [currentInstalling, setCurrentInstalling] = useState(null); // <-- new
+    const [currentInstalling, setCurrentInstalling] = useState(null);
     const [error, setError] = useState(null);
 
     // Configure API URL and API KEY via Vite env vars.
@@ -19,7 +19,7 @@ const DownloadPage = () => {
                 setLoading(true);
                 setError(null);
 
-                // 1) Fetch packages from server as before
+                // Fetch packages from server
                 const candidates = ["/api/packages"];
                 let lastErr = null;
                 let lastEndpoint = null;
@@ -64,29 +64,16 @@ const DownloadPage = () => {
                     serverPkgs = serverPkgs.map(n => ({ name: n }));
                 }
 
-                // 2) Determine client agent base (same logic used elsewhere)
-                let hostname = window.location.hostname;
-                let protocol = window.location.protocol;
-                if (API_URL) {
-                    try {
-                        const url = new URL(API_URL);
-                        hostname = url.hostname;
-                        protocol = url.protocol;
-                    } catch (e) {
-                        console.warn("Invalid API_URL, using window.location");
-                    }
-                }
-                const clientAgentBase = `${protocol}//${hostname}:4001`;
+                // Client agent base (running on same device as frontend)
+                const clientAgentBase = `http://localhost:4001`;
                 const agentEndpoint = `${clientAgentBase}/api/available-packages`;
 
-                // 3) Query agent for approved-but-not-installed package names and filter server list
                 try {
                     const agentRes = await fetch(agentEndpoint);
                     if (!agentRes.ok) {
                         const body = await agentRes.text().catch(() => "");
                         console.warn(`Agent responded ${agentRes.status}: ${body || agentRes.statusText}`);
-                        // Fallback: show server packages (best-effort) if agent unreachable
-                        setPackages(serverPkgs);
+                        setPackages(serverPkgs); // fallback
                     } else {
                         const agentData = await agentRes.json();
                         const availableNames = new Set((agentData.packages || []).filter(Boolean));
@@ -95,8 +82,7 @@ const DownloadPage = () => {
                     }
                 } catch (agentErr) {
                     console.warn('Failed to contact client agent for available packages:', agentErr);
-                    // Fallback: show server packages (best-effort) if agent unreachable
-                    setPackages(serverPkgs);
+                    setPackages(serverPkgs); // fallback
                 }
             } catch (e) {
                 const help = [
@@ -114,54 +100,28 @@ const DownloadPage = () => {
         fetchPackages();
     }, [API_URL, API_KEY]);
 
-    // New flow: send install request directly to the client agent
     const installPackage = async (pkg) => {
-        // If another package is being installed, inform user and do not change view
         if (currentInstalling && currentInstalling !== pkg.name) {
-            // Show a simple alert instead of modifying the React view
             window.alert(`Currently installing ${currentInstalling}`);
             return;
         }
 
-        // If this package is already being installed and user clicks again, inform them
         if (currentInstalling && currentInstalling === pkg.name && installing[pkg.name]) {
             window.alert(`Currently installing ${currentInstalling}`);
             return;
         }
 
-        // Prevent duplicate requests for the same package while it's being installed
-        if (installing[pkg.name]) {
-            return;
-        }
+        if (installing[pkg.name]) return;
 
-        // Mark as installing and set currentInstalling (no alert on first click)
         setInstalling(prev => ({ ...prev, [pkg.name]: true }));
         setCurrentInstalling(pkg.name);
-        setError(null); // Clear previous errors before a new attempt
+        setError(null);
 
-        // Determine client agent base:
-        let clientAgentBase = "";
-        let hostname = window.location.hostname;
-        let protocol = window.location.protocol;
-
-        if (API_URL) {
-            try {
-                const url = new URL(API_URL);
-                hostname = url.hostname;
-                protocol = url.protocol;
-            } catch (e) {
-                console.warn("Invalid API_URL, using window.location");
-            }
-        }
-
-        // Force port 4001
-        clientAgentBase = `${protocol}//${hostname}:4001`;
-
+        const clientAgentBase = `http://localhost:4001`;
         const installEndpoint = `${clientAgentBase}/api/install`;
 
         try {
             const headers = { "Content-Type": "application/json" };
-
             const res = await fetch(installEndpoint, {
                 method: "POST",
                 headers,
@@ -169,9 +129,7 @@ const DownloadPage = () => {
             });
 
             if (!res.ok) {
-                // Handle concurrent-install conflict specially: show alert and do not set error view
                 if (res.status === 409) {
-                    // Server indicates another install is running
                     window.alert(currentInstalling ? `Currently installing ${currentInstalling}` : `Another installation is in progress`);
                     return;
                 }
@@ -179,14 +137,12 @@ const DownloadPage = () => {
                 throw new Error(`Error ${res.status} from ${installEndpoint}: ${body || res.statusText}`);
             }
 
-            const body = await res.json().catch(() => ({}));
-            // Show explicit completed message with package name, then refresh
+            await res.json().catch(() => ({}));
             window.alert(`Completed installing ${pkg.name}`);
             window.location.reload();
         } catch (e) {
             setError(`Failed to send installation request: ${e.message}`);
         } finally {
-            // Clear installing flags (if page reloads on success this is redundant; kept for failure paths)
             setInstalling(prev => ({ ...prev, [pkg.name]: false }));
             setCurrentInstalling(null);
         }

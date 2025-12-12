@@ -309,20 +309,10 @@ const startAgent = () => {
     const keyPath = path.join(__dirname, 'server.key');
     const certPath = path.join(__dirname, 'server.cert');
 
-    try {
-        const key = fs.readFileSync(keyPath);
-        const cert = fs.readFileSync(certPath);
-        const options = { key, cert };
+    app.listen(AGENT_PORT, '0.0.0.0', () => {
+    console.log(`Agent listening on HTTP port ${AGENT_PORT}`);
+});
 
-        https.createServer(options, app).listen(AGENT_PORT, '0.0.0.0', () => {
-            console.log(`Client agent listening over HTTPS for install requests on port ${AGENT_PORT}`);
-        });
-    } catch (e) {
-        console.warn('Could not start HTTPS agent (missing/invalid cert or key). Falling back to HTTP. Error:', e.message);
-        app.listen(AGENT_PORT, '0.0.0.0', () => {
-            console.log(`Client agent listening over HTTP for install requests on port ${AGENT_PORT}`);
-        });
-    }
 };
 
 // Periodic package check service
