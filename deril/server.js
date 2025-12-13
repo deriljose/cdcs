@@ -21,6 +21,9 @@ const dbName = 'cdcs';
 const client = new MongoClient(mongoUri);
 let db;
 
+const { spawn } = require('child_process');
+const path = require('path');
+
 async function connectToDatabase() {
     try {
         await client.connect();
@@ -143,6 +146,69 @@ app.post('/api/log-install', requireApiKey, async (req, res) => {
     } catch (e) {
         console.error('Failed to insert installation log:', e);
         return res.status(500).json({ error: 'Failed to record installation log.' });
+    }
+});
+
+const pythonScript = path.join(__dirname, '../suhail/predict_ticket.py');
+
+app.post('/api/tickets', requireApiKey, async (req, res) => {
+    try {
+        const ticket = req.body || {};
+        if (!ticket.subject || !ticket.description) {
+            return res.status(400).json({ error: 'subject and description are required' });
+        }
+
+        const pythonScript = path.join(__dirname, '../suhail/predict_ticket.py');
+
+        // Spawn Python with description passed via stdin (safer than CLI args)
+        const pyProcess = spawn('python3', [pythonScript]);
+
+        let pyOutput = '';
+        let pyError = '';
+
+        pyProcess.stdout.on('data', (data) => {
+            pyOutput += data.toString();
+        });
+
+        pyProcess.stderr.on('data', (data) => {
+            pyError += data.toString();
+        });
+
+        // Write description to Python stdin
+        pyProcess.stdin.write(ticket.description + '\n');
+        pyProcess.stdin.end();
+
+        pyProcess.on('close', async (code) => {
+            if (code !== 0 || pyError) {
+                console.error('Python prediction error:', pyError);
+                return res.status(500).json({ error: 'Failed to predict ticket category/priority', detail: pyError });
+            }
+
+            let result;
+            try {
+                // Expecting JSON output from Python
+                result = JSON.parse(pyOutput);
+            } catch (parseErr) {
+                console.error('Failed to parse Python output:', parseErr, pyOutput);
+                return res.status(500).json({ error: 'Failed to parse Python prediction output', detail: pyOutput });
+            }
+
+            ticket.category = result.category || 'Unknown';
+            ticket.priority = result.priority || 'Unknown';
+            ticket.resolved = false;
+
+            try {
+                await db.collection('tickets').insertOne(ticket);
+                console.log('Received ticket with prediction:', ticket);
+                return res.status(201).json({ message: 'Ticket recorded with prediction.', ticket });
+            } catch (dbErr) {
+                console.error('Failed to insert ticket into DB:', dbErr);
+                return res.status(500).json({ error: 'Failed to record ticket in database.' });
+            }
+        });
+    } catch (e) {
+        console.error('Error in /api/tickets endpoint:', e);
+        return res.status(500).json({ error: 'Internal server error' });
     }
 });
 

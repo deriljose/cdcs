@@ -35,6 +35,19 @@ if (!AGENT_API_KEY) {
     process.exit(1);
 }
 
+const { execSync } = require('child_process');
+
+const getActualUser = () => {
+    // Get actual username (excluding admin)
+    // Since script run as sudo, otherwise returned username will always be "root"
+    const result = execSync(
+        "cut -d: -f1,3 /etc/passwd | egrep ':[0-9]{4}$' | cut -d: -f1 | grep -v 'admin'",
+        { encoding: 'utf8' }
+    ).trim();
+
+    return result;
+};
+
 // Function to return MAC address
 // Sent back to server when reporting unauthorized packages or logging installs
 const getMacAddress = () => {
@@ -81,13 +94,13 @@ const performPackageCheck = async () => {
         if (newPackages.length > 0) {
             console.log(`Found ${newPackages.length} unauthorized packages. Sending report...`);
             const timestamp = new Date().toISOString();
-            postData = JSON.stringify({ msg_type: 1001, timestamp, username: os.userInfo().username, mac_address: getMacAddress(), new_packages: newPackages });
+            postData = JSON.stringify({ msg_type: 1001, timestamp, username: getActualUser(), mac_address: getMacAddress(), new_packages: newPackages });
             requestPath = '/message';
         }
         // Else, just log as heartbeat
         else {
             console.log('No unauthorized packages found.');
-            postData = JSON.stringify({ username: os.userInfo().username, mac_address: getMacAddress() });
+            postData = JSON.stringify({ username: getActualUser(), mac_address: getMacAddress() });
             requestPath = '/api/check-in';
         }
 
@@ -219,7 +232,7 @@ const startAgent = () => {
                 const logDoc = {
                     timestamp: new Date().toISOString(),
                     package: packageName,
-                    username: os.userInfo().username || 'unknown',
+                    username: getActualUser(),
                     mac_address: getMacAddress(),
                     client_host: os.hostname(),
                     result: 'success'
@@ -267,7 +280,7 @@ const startAgent = () => {
                 const failLog = {
                     timestamp: new Date().toISOString(),
                     package: packageName,
-                    username: os.userInfo().username || 'unknown',
+                    username: getActualUser(),
                     mac_address: getMacAddress(),
                     client_host: os.hostname(),
                     result: 'failure',
@@ -302,6 +315,64 @@ const startAgent = () => {
         } finally {
             isInstalling = false;
             console.log('Agent installation lock released.');
+        }
+    });
+
+    app.post('/api/ticket', async (req, res) => {
+        try {
+            const { subject, description } = req.body || {};
+            if (!subject || !description) {
+                return res.status(400).json({ error: 'subject and description are required' });
+            }
+
+            // Build ticket payload for server
+            const ticket = {
+                subject,
+                description,
+                timestamp: new Date().toISOString(),
+                username: getActualUser(),
+                mac_address: getMacAddress(),
+                client_host: os.hostname(),
+            };
+
+            const postData = JSON.stringify(ticket);
+            const options = {
+                hostname: serverHostname,
+                port: 3000,
+                path: '/api/tickets',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(postData),
+                    'X-API-Key': AGENT_API_KEY
+                },
+                rejectUnauthorized: false
+            };
+
+            const reqToServer = https.request(options, (srvRes) => {
+                let data = '';
+                srvRes.on('data', (chunk) => (data += chunk));
+                srvRes.on('end', () => {
+                    // forward server response code & message
+                    if (srvRes.statusCode && srvRes.statusCode >= 200 && srvRes.statusCode < 300) {
+                        return res.status(201).json({ message: 'Ticket forwarded to server' });
+                    } else {
+                        console.error('Agent: server ticket forward failed:', srvRes.statusCode, data);
+                        return res.status(502).json({ error: 'Failed to forward ticket to server', serverStatus: srvRes.statusCode, serverBody: data });
+                    }
+                });
+            });
+
+            reqToServer.on('error', (err) => {
+                console.error('Agent: Error forwarding ticket to server:', err);
+                return res.status(502).json({ error: 'Error forwarding ticket to server', detail: err.message || String(err) });
+            });
+
+            reqToServer.write(postData);
+            reqToServer.end();
+        } catch (err) {
+            console.error('Agent /api/ticket error:', err);
+            return res.status(500).json({ error: 'Internal agent error' });
         }
     });
 
