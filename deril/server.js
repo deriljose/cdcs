@@ -3,7 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const cors = require('cors');
 const os = require('os');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 require('dotenv').config(); // Load environment variables from .env file
 
 const app = express();
@@ -46,10 +46,13 @@ if (VALID_API_KEYS.size === 0) {
 }
 const requireApiKey = (req, res, next) => {
     const apiKey = req.get('X-API-Key');
+    // Add logging to see if this middleware is being hit unexpectedly
+    console.log(`[API Key Check] Path: "${req.path}", Method: ${req.method}, Key Provided: ${apiKey ? 'Yes' : 'No'}`);
     if (apiKey && VALID_API_KEYS.has(apiKey)) {
         return next();
     }
-    res.status(401).json({ error: 'Unauthorized: A valid X-API-Key header is required.' });
+    console.error(`[API Key Check] Unauthorized access attempt on "${req.path}". This endpoint requires a valid X-API-Key header.`);
+    res.status(401).json({ error: 'Unauthorized', detail: 'A valid X-API-Key header is required for this endpoint.' });
 };
 
 // Example: endpoint that historically queued installs (kept for compatibility)
@@ -131,6 +134,105 @@ const createReadOnlyEndpoint = (path, collectionName) => {
 createReadOnlyEndpoint('/flagged', 'flagged');
 createReadOnlyEndpoint('/employees', 'employees');
 createReadOnlyEndpoint('/packages', 'packages');
+
+// --- Public, Key-less Endpoints for Frontend Dashboard ---
+// These are separate from the key-protected endpoints used by other clients.
+
+app.get('/api/employees', async (req, res) => {    
+    try {
+        const collection = db.collection('employees');
+        const data = await collection.find({}).toArray();
+        res.json(data);
+    } catch (e) {
+        console.error(`MongoDB error on /api/employees:`, e);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.get('/api/packages', async (req, res) => {
+    try {
+        const collection = db.collection('packages');
+        const data = await collection.find({}).toArray();
+        res.json(data);
+    } catch (e) {
+        console.error(`MongoDB error on /api/packages:`, e);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.get('/api/tickets', async (req, res) => {
+    try {
+        const collection = db.collection('tickets');
+        // Sort by timestamp descending to show the newest tickets first
+        const data = await collection.find({}).sort({ timestamp: -1 }).toArray();
+        res.json(data);
+    } catch (e) {
+        console.error(`MongoDB error on /api/tickets:`, e);
+        res.status(500).json({ error: 'Database error' });
+    }
+});
+
+app.post('/api/packages', async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name || typeof name !== 'string' || name.trim() === '') {
+            return res.status(400).json({ error: 'A non-empty package name is required.' });
+        }
+
+        const collection = db.collection('packages');
+        const trimmedName = name.trim();
+
+        const existingPackage = await collection.findOne({ name: trimmedName });
+        if (existingPackage) {
+            return res.status(409).json({ error: 'Package already exists in the whitelist.' });
+        }
+
+        const result = await collection.insertOne({ name: trimmedName });
+        const newPackage = { _id: result.insertedId, name: trimmedName };
+
+        res.status(201).json(newPackage);
+    } catch (e) {
+        console.error(`Error on POST /api/packages:`, e);
+        res.status(500).json({ error: 'Database error while adding package.' });
+    }
+});
+
+app.delete('/api/packages/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'Invalid package ID format.' });
+        }
+        const collection = db.collection('packages');
+        const result = await collection.deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ error: 'Package not found.' });
+        }
+        res.status(204).send();
+    } catch (e) {
+        console.error(`Error on DELETE /api/packages/${req.params.id}:`, e);
+        res.status(500).json({ error: 'Database error while deleting package.' });
+    }
+});
+
+app.delete('/api/tickets/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ error: 'Invalid ticket ID format.' });
+        }
+        const collection = db.collection('tickets');
+        const result = await collection.deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ error: 'Ticket not found.' });
+        }
+        // On successful deletion, send 204 No Content
+        res.status(204).send();
+    } catch (e) {
+        console.error(`Error on DELETE /api/tickets/${req.params.id}:`, e);
+        res.status(500).json({ error: 'Database error while deleting ticket.' });
+    }
+});
 
 // NEW: Endpoint to receive installation logs from clients.
 // Server's only responsibility in this flow is to record the installation event.

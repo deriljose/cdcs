@@ -2,13 +2,10 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Download,
   MessageSquare,
-  GitBranch,
   Users,
   CheckSquare,
   AlertTriangle,
-  HardDrive,
 } from "lucide-react";
 
 // Import the component-specific CSS file
@@ -28,18 +25,23 @@ const Sidebar = () => {
       {/* Use the 'sidebar-nav' class */}
       <nav className="sidebar-nav">
         <NavLink to="/" className={getNavLinkClass} end>
-          <Download />
-          <span>Downloads</span>
-        </NavLink>
-
-        <NavLink to="/git" className={getNavLinkClass}>
-          <GitBranch />
-          <span>Git</span>
+          <Users />
+          <span>Employees</span>
         </NavLink>
 
         <NavLink to="/raise-ticket" className={getNavLinkClass}>
           <MessageSquare />
-          <span>Raise Ticket</span>
+          <span>Support Ticket</span>
+        </NavLink>
+
+        <NavLink to="/whitelist" className={getNavLinkClass}>
+          <CheckSquare />
+          <span>Whitelist</span>
+        </NavLink>
+        
+        <NavLink to="/alerts" className={getNavLinkClass}>
+          <AlertTriangle />
+          <span>Alerts</span>
         </NavLink>
       </nav>
     </aside>

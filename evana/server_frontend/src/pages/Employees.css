@@ -1,0 +1,51 @@
+/* src/pages/Employees.css */
+
+.employees-table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem; /* 14px */
+  line-height: 1.25rem; /* 20px */
+}
+
+.employees-table thead {
+  background-color: #f9fafb; /* gray-50 */
+}
+
+.employees-table th {
+  padding: 0.75rem 1.5rem; /* px-6 py-3 */
+  text-align: left;
+  font-size: 0.75rem; /* 12px */
+  font-weight: 500;
+  color: #6b7280; /* gray-500 */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+}
+
+.employees-table tbody {
+  background-color: #ffffff; /* white */
+}
+
+.employees-table tr {
+  border-bottom: 1px solid #e5e7eb; /* gray-200 */
+  transition: background-color 0.15s ease-in-out;
+}
+
+.employees-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.employees-table tbody tr:hover {
+  background-color: #f9fafb; /* gray-50 */
+}
+
+.employees-table td {
+  padding: 1rem 1.5rem; /* px-6 py-4 */
+  white-space: nowrap;
+  color: #6b7280; /* gray-500 */
+}
+
+.employees-table td.employee-id-cell {
+  font-weight: 500;
+  color: #111827; /* gray-900 */
+}
