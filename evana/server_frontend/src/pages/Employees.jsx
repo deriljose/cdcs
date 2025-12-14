@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import "./Employees.css"; // Import the component-specific CSS file
+import "./Employees.css";
 
 const Employees = () => {
+  // States for managing employees, loading status, and errors
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -9,18 +10,12 @@ const Employees = () => {
   useEffect(() => {
     const fetchEmployees = async () => {
       try {
-        const response = await fetch("/api/employees"); // Use relative path to leverage the Vite proxy
-        if (!response.ok) {
-          // Try to get more details from the response body for better debugging
-          const errorData = await response.json().catch(() => ({})); // Gracefully handle non-JSON responses
-          const errorMessage = errorData.detail || errorData.error || `HTTP error! Status: ${response.status}`;
-          throw new Error(errorMessage);
-        }
+        const response = await fetch("/api/employees");
+
         const data = await response.json();
         setEmployees(data);
       } catch (e) {
-        setError(e.message);
-        console.error("Failed to fetch employees:", e);
+        setError("Server likely not running");
       } finally {
         setLoading(false);
       }
@@ -33,7 +28,7 @@ const Employees = () => {
     <div className="p-10 flex-1">
       <h1 className="text-4xl font-bold mb-2">Employees</h1>
       <p className="text-gray-500 mb-6">
-        Manage your organization's employees.
+        Details of employees
       </p>
       <div className="bg-white shadow rounded-xl p-6 w-full overflow-x-auto">
         {loading && <p className="text-gray-700">Loading employees...</p>}
@@ -42,7 +37,7 @@ const Employees = () => {
           <table className="employees-table">
             <thead>
               <tr>
-                <th scope="col">Employee ID</th>
+                <th scope="col">ID</th>
                 <th scope="col">Name</th>
                 <th scope="col">Username</th>
                 <th scope="col">MAC Address</th>

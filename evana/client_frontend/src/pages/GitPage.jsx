@@ -1,15 +1,14 @@
 import React from "react";
-import { GitBranch } from "lucide-react";
+import "./styles.css";
 
 const GitPage = () => {
   return (
     <div className="p-10 flex-1">
       <h1 className="text-4xl font-bold mb-2 flex items-center">
-        <GitBranch className="w-7 h-7 mr-2 text-blue-600" />
         Git Repositories
       </h1>
       <p className="text-gray-500 mb-6">
-        Access internal Git repositories and version control tools.
+        Repositories you have access to
       </p>
 
       <ul className="bg-white shadow rounded-xl divide-y">

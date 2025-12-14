@@ -1,12 +1,10 @@
-
-
 .app-container {
   display: flex;
   min-height: 100vh;
 }
 
 .main-content {
-  flex-grow: 1; /* This makes the content area fill the remaining space */
+  flex-grow: 1;
   padding: 24px;
   background-color: #f9fafb;
 }

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import "./SupportTicket.css"; // Use component-specific styles
+import "./SupportTickets.css";
 
 const SupportTicket = () => {
+  // States for managing tickets, loading status, errors, and expanded ticket details
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -11,19 +12,11 @@ const SupportTicket = () => {
     const fetchTickets = async () => {
       try {
         const response = await fetch("/api/tickets");
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const errorMessage =
-            errorData.detail ||
-            errorData.error ||
-            `HTTP error! Status: ${response.status}`;
-          throw new Error(errorMessage);
-        }
+
         const data = await response.json();
         setTickets(data);
       } catch (e) {
-        setError(e.message);
-        console.error("Failed to fetch tickets:", e);
+        setError("Server likely not running");
       } finally {
         setLoading(false);
       }
@@ -35,33 +28,29 @@ const SupportTicket = () => {
   const handleDeleteTicket = async (ticketId) => {
     if (
       !window.confirm(
-        "Are you sure you want to resolve and delete this ticket? This action cannot be undone."
+        "Are you sure you want to resolve and delete this ticket?"
       )
     ) {
       return;
     }
-    try {
-      const response = await fetch(`/api/tickets/${ticketId}`, {
-        method: "DELETE",
-      });
-      if (response.status !== 204) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to delete ticket");
-      }
-      setTickets((prevTickets) => prevTickets.filter((ticket) => ticket._id !== ticketId));
-    } catch (err) {
-      setError(err.message);
-      console.error("Failed to delete ticket:", err);
+
+    const response = await fetch(`/api/tickets/${ticketId}`, {
+      method: "DELETE",
+    });
+
+    if (response.status !== 204) {
+      setError("Failed to delete ticket");
     }
+
+    setTickets((prevTickets) => prevTickets.filter((ticket) => ticket._id !== ticketId));
   };
 
   return (
     <div className="p-10 flex-1">
-      {/* --- Section to Display Existing Tickets --- */}
       <div className="mt-12">
-        <h2 className="text-3xl font-bold mb-2">Existing Tickets</h2>
+        <h2 className="text-3xl font-bold mb-2">Support Tickets</h2>
         <p className="text-gray-500 mb-6">
-          A list of all submitted support tickets.
+          Currently open support tickets
         </p>
         <div className="bg-white shadow rounded-xl p-6 w-full overflow-x-auto">
           {loading && <p className="text-gray-700">Loading tickets...</p>}
@@ -74,7 +63,7 @@ const SupportTicket = () => {
                   <th scope="col">Category</th>
                   <th scope="col">Priority</th>
                   <th scope="col">Username</th>
-                  <th scope="col">Submitted On</th>
+                  <th scope="col">Submitted on</th>
                   <th scope="col">Status</th>
                 </tr>
               </thead>
@@ -110,13 +99,12 @@ const SupportTicket = () => {
                       <tr>
                         <td colSpan="6" className="expanded-row-content">
                           <div className="description-block">
-                            <strong>Description:</strong>
                             <p>{ticket.description}</p>
                             <button
                               onClick={() => handleDeleteTicket(ticket._id)}
                               className="resolve-ticket-btn"
                             >
-                              Resolve & Delete Ticket
+                              Resolve & Delete
                             </button>
                           </div>
                         </td>
