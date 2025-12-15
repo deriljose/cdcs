@@ -222,6 +222,23 @@ app.delete('/api/tickets/:id', asyncHandler(async (req, res) => {
     res.status(204).send();
 }));
 
+app.patch('/api/tickets/:id/resolve', async (req, res) => {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ error: 'Invalid ticket ID format.' });
+    }
+    const collection = db.collection('tickets');
+    const result = await collection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { resolved: true } } // Set the resolved field to true
+    );
+    if (result.modifiedCount === 0) {
+        return res.status(500).json({ error: 'Failed to update ticket status.' });
+    }
+    const updatedTicket = await collection.findOne({ _id: new ObjectId(id) });
+    // On successful deletion, send 200 OK
+    res.status(200).json(updatedTicket);
+});
 
 // An endpoint for client agents to log the result of a package installation.
 app.post('/api/log-install', requireApiKey, asyncHandler(async (req, res) => {
