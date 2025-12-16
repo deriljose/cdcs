@@ -174,12 +174,10 @@ const startAgent = () => {
             const { stdout } = await execFile(path.join(__dirname, '../juan/default_packages.sh')); 
             const installed = new Set(stdout.split('\n').map(s => s.trim()).filter(Boolean)); 
             // Fetch approved packages from MongoDB
-            const dbPackagesArr = await db.collection(collectionName).find({}, { projection: { _id: 0, name: 1 } }).toArray(); 
-
-            const approved = dbPackagesArr.map(p => p && p.name).filter(Boolean); 
+            const approvedPackages = await db.collection(collectionName).find({}).toArray();
 
             // Filter out already installed packages
-            const notInstalled = approved.filter(pkg => !installed.has(pkg)); 
+            const notInstalled = approvedPackages.filter(pkg => pkg && pkg.name && !installed.has(pkg.name));
 
             return res.json({ packages: notInstalled });
         } catch (err) {

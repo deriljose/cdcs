@@ -13,52 +13,37 @@ const DownloadPage = () => {
     // Error state to handle issues
     const [error, setError] = useState(null);
 
-    const API_URL = import.meta.env.VITE_API_URL;
-    const API_KEY = import.meta.env.VITE_API_KEY;
-
     useEffect(() => {
         const fetchPackages = async () => {
             try {
                 setLoading(true);
                 setError(null);
 
-                // Fetch packages from the server endpoint
-                const endpoint = "/api/packages";
-                let serverData = null;
-
-                const headers = { Accept: "application/json" };
-                if (API_KEY) {
-                    headers.Authorization = `Bearer ${API_KEY}`;
-                    headers["X-API-Key"] = API_KEY;
-                }
-                const res = await fetch(endpoint, { headers });
-
-                serverData = await res.json();
-
                 // Localhost because client runs on same device as frontend
                 const clientAgentBase = `http://localhost:4001`;
                 const agentEndpoint = `${clientAgentBase}/api/available-packages`;
 
-                // Fetch list of available packages on the user's device
-                try {
-                    const agentRes = await fetch(agentEndpoint);
-                    const agentData = await agentRes.json();
-                    const availableNames = new Set((agentData.packages));
-                    // Check if package exists on client
-                    const filtered = serverData.filter(p => p && p.name && availableNames.has(p.name));
-                    setPackages(filtered);
-                } catch (agentErr) {
-                    setError("Client likely not running or CORS issue");
+                // Fetch list of available packages from the client agent.
+                // The agent is responsible for getting the master list and filtering
+                // out packages that are already installed.
+                const agentRes = await fetch(agentEndpoint);
+                if (!agentRes.ok) {
+                    const errorText = await agentRes.text();
+                    throw new Error(`Client agent responded with status ${agentRes.status}: ${errorText}`);
                 }
-            } catch (e) {
-                setError("Server likely not running or incorrect API key");
+                const agentData = await agentRes.json();
+
+                // The agent now returns the full package objects that are available for download
+                setPackages(agentData.packages || []);
+            } catch (err) {
+                setError(err.message || "Client likely not running or CORS issue. Please ensure the client service is active.");
             } finally {
                 setLoading(false);
             }
         };
 
         fetchPackages();
-    }, [API_URL, API_KEY]);
+    }, []);
 
     const installPackage = async (pkg) => {
         // Prevent starting installation if another package is being installed
