@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# Policy switches
+ALLOW_REAL_SETUP=false
+ALLOW_REAL_RESET=false
+
 set -e
 
 if [ $# -lt 1 ]; then
@@ -31,6 +36,24 @@ echo "Mode: $MODE | Test Mode: $DRY_RUN"
 echo ""
 
 setup_all() {
+
+    echo "SETUP REQUEST RECEIVED"
+    echo "--------------------------------"
+    echo "Policy      : SIMULATION MODE"
+    echo "Reason      : Device provisioning requested"
+    echo "Timestamp   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "Hostname    : $(hostname)"
+    echo "User        : ${SUDO_USER:-$USER}"
+    echo "--------------------------------"
+
+    if [ "$ALLOW_REAL_SETUP" != "true" ]; then
+        echo "[CDCS] Real setup is DISABLED by policy."
+        echo "[CDCS] No system changes executed."
+        echo "[CDCS] Setup acknowledged."
+        echo ""
+        return 0
+    fi
+
     echo " SETTING UP YOUR SYSTEM"
     echo "=========================="
     echo ""
@@ -88,37 +111,26 @@ EOF
 }
 
 reset_all() {
-    echo " RESETTING YOUR SYSTEM"
-    echo "========================"
-    echo ""
+    echo "[CDCS] RESET REQUEST RECEIVED"
+    echo "--------------------------------"
+    echo "Policy      : SIMULATION MODE"
+    echo "Reason      : Remote reset requested by server"
+    echo "Timestamp   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "Hostname    : $(hostname)"
+    echo "User        : ${SUDO_USER:-$USER}"
+    echo "--------------------------------"
 
-    echo " Stopping security services..."
-    run_cmd sudo systemctl stop fail2ban || true
-    run_cmd sudo ufw disable || true
-
-    echo ""
-    echo " Removing configuration files..."
-    run_cmd sudo rm -f /etc/fail2ban/jail.local
-    run_cmd sudo rm -f /etc/cron.weekly/cdcs-system-upgrade
-    run_cmd sudo rm -f /etc/cron.weekly/cdcs-git-backup
-    run_cmd sudo rm -f /usr/local/bin/cdcs-backup.sh
-    run_cmd sudo rm -rf /var/backups/git-backup
-
-    echo ""
-    echo "  Reinstalling everything fresh..."
-    setup_all
-
-    echo " RESET COMPLETE!"
-    echo ""
+    if [ "$ALLOW_REAL_RESET" != "true" ]; then
+        echo "[CDCS] Real reset is DISABLED by policy."
+        echo "[CDCS] No destructive actions executed."
+        echo "[CDCS] Reset acknowledged."
+        return 0
+    fi
 }
 
 case "$MODE" in
-    setup)
-        setup_all
-        ;;
-    reset)
-        reset_all
-        ;;
+    setup) setup_all  ;;
+    reset) reset_all  ;;
     *)
         echo "Usage: $0 {setup|reset} [--dry-run]"
         exit 1
