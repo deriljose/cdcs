@@ -25,24 +25,40 @@ const SupportTicket = () => {
     fetchTickets();
   }, []);
 
-  const handleDeleteTicket = async (ticketId) => {
+  const handleResolveTicket = async (ticketId) => {
     if (
       !window.confirm(
-        "Are you sure you want to resolve and delete this ticket?"
+        "Are you sure you want to resolve this ticket? This action cannot be undone."
       )
     ) {
       return;
     }
 
-    const response = await fetch(`/api/tickets/${ticketId}`, {
-      method: "DELETE",
-    });
+    try {
+      // Send PATCH request to the server to update the ticket status to resolved
+      const response = await fetch(`/api/tickets/${ticketId}/resolve`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ resolved: true }), // Assuming the body needs this structure
+      });
 
-    if (response.status !== 204) {
-      setError("Failed to delete ticket");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to resolve ticket");
+      }
+
+      // Update the ticket in local state to reflect the resolved status
+      setTickets((prevTickets) =>
+        prevTickets.map((ticket) =>
+          ticket._id === ticketId ? { ...ticket, resolved: true } : ticket
+        )
+      );
+    } catch (err) {
+      setError(err.message); // Set the error message in case of failure
+      console.error("Failed to resolve ticket:", err);
     }
-
-    setTickets((prevTickets) => prevTickets.filter((ticket) => ticket._id !== ticketId));
   };
 
   return (
@@ -100,12 +116,14 @@ const SupportTicket = () => {
                         <td colSpan="6" className="expanded-row-content">
                           <div className="description-block">
                             <p>{ticket.description}</p>
-                            <button
-                              onClick={() => handleDeleteTicket(ticket._id)}
-                              className="resolve-ticket-btn"
-                            >
-                              Resolve & Delete
-                            </button>
+                            {!ticket.resolved && (
+                              <button
+                                onClick={() => handleResolveTicket(ticket._id)}
+                                className="resolve-ticket-btn"
+                              >
+                                Resolve
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
