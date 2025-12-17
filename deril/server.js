@@ -88,24 +88,48 @@ app.post('/api/install-package', requireApiKey, asyncHandler(async (req, res) =>
  * The client agent periodically sends a message here. If there's a command
  * in the queue for it, the server sends it back as a response.
  */
-app.post('/api/check-in', (req, res) => {
+// An endpoint to check-in from the client.
+app.post('/api/check-in', asyncHandler(async (req, res) => {
+    const { username, mac_address } = req.body;
+    // Check if there is any pending command to send
     if (commandQueue.length > 0) {
         const command = commandQueue.shift();
-        const clientIdentifier = req.body.mac_address || 'unknown';
-        console.log(`Sending command to polling client ${clientIdentifier}:`, command);
+
+        // Log data for command response
         const logDoc = {
             timestamp: new Date().toISOString(),
             package: command.packageName,
-            username: req.body.username || 'unknown',
-            mac_address: clientIdentifier
+            username: username,
+            mac_address: mac_address
         };
-        db.collection('installation_logs').insertOne(logDoc).catch(e => console.error('Failed to insert log:', e));
+        await db.collection('installation_logs').insertOne(logDoc).catch(e => console.error('Failed to insert log:', e));
+        
+        // Send command to client
         res.json(command);
     } else {
         res.json({ reply: 'OK. No pending commands.' });
     }
-});
 
+    // Update user’s timestamp in the database if needed
+    const userCollection = db.collection('employees');
+    const user = await userCollection.findOne({ username: username });
+
+    if (user) {
+        const lastTimestamp = new Date(user.timestamp);
+        const now = new Date();
+
+        // 1 hour in ms
+        if ((now - lastTimestamp) > 60 * 60 * 1000) {
+            await userCollection.updateOne(
+                { username: username },
+                { $set: { timestamp: now.toISOString() } }
+            );
+            console.log(`User ${username}'s timestamp updated.`);
+        }
+    } else {
+        console.warn(`User ${username} not found in database.`);
+    }
+}));
 
 // An endpoint for clients to report unauthorized packages.
 app.post('/message', asyncHandler(async (req, res) => {

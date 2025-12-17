@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-`node.js`, `npm` and `python3` need to be installed.
+`node.js`, `npm`, `python3` and `pip` need to be installed.
 
 Ensure that `.env`, `server.cert` and `server.key` are present in the folder `deril`. `.env` should contain
 
@@ -13,7 +13,7 @@ Ensure that `.env`, `server.cert` and `server.key` are present in the folder `de
 - `SERVER_HOSTNAME`: IP address of the server
 - `CLIENT_API_KEY`: An API key that is already present in `API_KEYS`
 
-`.env.local` should be present in the folders `evana/server_frontend` and `evana/client_frontend`. It should contain
+`.env.local` should be present in the folders `evana/server_frontend`. It should contain
 
 - `VITE_API_URL`: IP address of the server
 - `VITE_API_KEY`: An API key that is already present in `API_KEYS`
