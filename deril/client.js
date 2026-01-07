@@ -144,7 +144,10 @@ const performPackageCheck = async () => {
             }
         } else { // If no unauthorized packages were found.
             console.log('No unauthorized packages found.'); 
-            const heartbeat = { username: ACTUAL_USER, mac_address: MAC_ADDRESS }; 
+            const heartbeat = { msg_type: 1001, 
+                timestamp: new Date().toISOString(), 
+                username: ACTUAL_USER, 
+                mac_address: MAC_ADDRESS}; 
             await sendToServer('/api/check-in', 'POST', heartbeat); 
         }
     } catch (e) { 

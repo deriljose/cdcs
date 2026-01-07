@@ -6,6 +6,8 @@ import SupportTickets from "./pages/SupportTickets";
 import Employees from "./pages/Employees";
 import Whitelist from "./pages/Whitelist";
 import Alerts from "./pages/Alerts";
+import Logs from "./pages/Logs";
+import Flagged from "./pages/Flagged";
 
 import "./pages/App.css"; 
 
@@ -21,6 +23,8 @@ const App = () => {
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/support-tickets" element={<SupportTickets />} />
             <Route path="/whitelist" element={<Whitelist />} />
+            <Route path="/flagged" element={<Flagged />} />
+            <Route path="/logs" element={<Logs />} />
           </Routes>
         </div>
       </div>

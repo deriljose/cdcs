@@ -4,7 +4,9 @@ import {
   MessageSquare,
   Users,
   CheckSquare,
-  AlertTriangle
+  AlertTriangle,
+  FileText,
+  Flag
 } from "lucide-react";
 
 import "./Sidebar.css";
@@ -32,6 +34,16 @@ const Sidebar = () => {
         <NavLink to="/whitelist" className={getNavLinkClass}>
           <CheckSquare />
           <span>Whitelist</span>
+        </NavLink>
+
+        <NavLink to="/flagged" className={getNavLinkClass}>
+          <Flag />
+          <span>Flagged</span>
+        </NavLink>
+
+        <NavLink to="/logs" className={getNavLinkClass}>
+          <FileText />
+          <span>Logs</span>
         </NavLink>
         
         <NavLink to="/alerts" className={getNavLinkClass}>

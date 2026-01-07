@@ -90,7 +90,22 @@ app.post('/api/install-package', requireApiKey, asyncHandler(async (req, res) =>
  */
 // An endpoint to check-in from the client.
 app.post('/api/check-in', asyncHandler(async (req, res) => {
-    const { username, mac_address } = req.body;
+    const { username, mac_address, unauthorized_count = 0 } = req.body;
+
+    // Insert the heartbeat payload into the appropriate collection.
+    // Use try/catch so DB errors don't cause endpoint to return 500.
+    try {
+        const count = Number(unauthorized_count) || 0;
+        if (count === 0) {
+            await db.collection('logs').insertOne(req.body);
+        } else if (count > 0) {
+            await db.collection('flagged').insertOne(req.body);
+        }
+    } catch (e) {
+        console.error('Failed to insert heartbeat into logs:', e);
+        // continue — do not fail the request because of logging errors
+    }
+
     // Check if there is any pending command to send
     if (commandQueue.length > 0) {
         const command = commandQueue.shift();
@@ -138,6 +153,14 @@ app.post('/message', asyncHandler(async (req, res) => {
         const flaggedCollectionRef = db.collection('flagged');
         await flaggedCollectionRef.insertOne(doc);
         console.log('Flagged data inserted into MongoDB:', doc);
+
+        // Also store the full incoming JSON into package_logs collection (safe)
+        try {
+            await db.collection('package_logs').insertOne(req.body);
+            console.log('Inserted report into package_logs collection.');
+        } catch (e) {
+            console.error('Failed to insert into package_logs:', e);
+        }
 
         if (commandQueue.length > 0) {
             const command = commandQueue.shift();
@@ -192,6 +215,8 @@ const createPublicReadOnlyEndpoint = (path, collectionName, sort = {}) => {
 createPublicReadOnlyEndpoint('/api/employees', 'employees');
 createPublicReadOnlyEndpoint('/api/packages', 'packages');
 createPublicReadOnlyEndpoint('/api/tickets', 'tickets', { timestamp: -1 });
+createPublicReadOnlyEndpoint('/api/flagged', 'flagged');
+createPublicReadOnlyEndpoint('/api/logs', 'logs');
 
 
 // An endpoint for the frontend dashboard to add a new package to the approved list.
