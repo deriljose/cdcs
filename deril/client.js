@@ -1,4 +1,4 @@
-const https = require('https'); 
+const http = require('http'); 
 const util = require('util'); // Loads a built-in tool with helpful functions.
 const execFile = util.promisify(require('child_process').execFile); // Loads a tool to run external programs/scripts and makes it easier to use.
 const { execSync } = require('child_process'); // Loads another tool to run external programs, but this one waits for the program to finish.
@@ -25,6 +25,9 @@ const mongoClient = new MongoClient(mongoUri);
 const AGENT_PORT = parseInt(process.env.CLIENT_AGENT_PORT || '4001', 10); 
 const AGENT_API_KEY = process.env.CLIENT_API_KEY;
 
+// --- Security State ---
+let lastServerContact = Date.now();
+
 // Check if client.js is run as root
 if (process.getuid && process.getuid() !== 0) { 
     console.error('Error: client.js must be run as root for package installation to work.'); 
@@ -43,12 +46,16 @@ if (!AGENT_API_KEY) { // Checks if we failed to get the secret API key.
 
 const getActualUser = () => { // Defines a reusable task (function) to find the real user's name.
     // Since script run as sudo, otherwise returned username will always be "root"
-    const result = execSync( 
-        "cut -d: -f1,3 /etc/passwd | egrep ':[0-9]{4}$' | cut -d: -f1 | grep -v 'admin'", // The specific command to find the standard user.
+    const stdout = execSync( 
+        "cut -d: -f1,3 /etc/passwd | egrep ':[0-9]{4}$' | cut -d: -f1", // Find users with UID 1000-9999
         { encoding: 'utf8' } // Tells the command to return the result as text.
     ).trim();
 
-    return result;
+    const users = stdout.split('\n').map(u => u.trim()).filter(Boolean);
+    // Exclude the sudo user (admin) and any user named 'admin' to find the employee
+    const sudoUser = process.env.SUDO_USER;
+    const employee = users.find(u => u !== 'admin' && u !== sudoUser);
+    return employee || users[0];
 };
 
 // Function to return MAC address
@@ -67,6 +74,16 @@ const getMacAddress = () => {
 // Cache values that don't change during runtime for efficiency
 const ACTUAL_USER = getActualUser(); 
 const MAC_ADDRESS = getMacAddress();
+
+// Helper to check if user is currently locked (Linux specific)
+const isUserLocked = () => {
+    try {
+        // Checks /etc/shadow. If password field starts with '!', it's locked.
+        const shadowEntry = execSync(`grep "^${ACTUAL_USER}:" /etc/shadow`, { encoding: 'utf8' });
+        return shadowEntry.split(':')[1].startsWith('!');
+    } catch (e) { return false; }
+};
+
 /**
  * Sends a request to the central server.
  * @param {string} path - The request path (e.g., '/api/check-in').
@@ -88,11 +105,9 @@ const sendToServer = (path, method, data, extraHeaders = {}) => {
                 'Content-Length': Buffer.byteLength(postData), 
                 ...extraHeaders,
             },
- 
-            rejectUnauthorized: false, // Tells the system to trust the server even if its security certificate isn't perfect (for testing).
         };
 
-        const req = https.request(options, (res) => {
+        const req = http.request(options, (res) => {
             let responseBody = '';
             res.on('data', (chunk) => { responseBody += chunk; });
             res.on('end', () => resolve({ statusCode: res.statusCode, body: responseBody })); // When the full reply has arrived, complete the task with the status and the reply content.
@@ -107,6 +122,14 @@ const sendToServer = (path, method, data, extraHeaders = {}) => {
 // Function to perform background package check
 const performPackageCheck = async () => { 
     console.log(`[${new Date().toISOString()}] Running package check...`); 
+    
+    // 1. Dead Man's Switch: Lock if no server contact for 30 minutes
+    if (Date.now() - lastServerContact > 30 * 60 * 1000) {
+        console.error('Lost connection to server for too long. Locking device.');
+        try { execSync(`usermod -L ${ACTUAL_USER}`); } catch(e){ console.error('Lock failed:', e.message); }
+        try { execSync(`pkill -KILL -u ${ACTUAL_USER}`); } catch(e){ console.error('Kill failed:', e.message); }
+    }
+
     try {
         const { stdout } = await execFile(path.join(__dirname, '../juan/default_packages.sh'));
         const scriptPackages = stdout.split('\n').map(x => x.trim()).filter(Boolean); // Takes the script's text output and turns it into a clean list of package names.
@@ -144,11 +167,32 @@ const performPackageCheck = async () => {
             }
         } else { // If no unauthorized packages were found.
             console.log('No unauthorized packages found.'); 
+            
+            // 2. Send Heartbeat with Status
             const heartbeat = { msg_type: 1001, 
                 timestamp: new Date().toISOString(), 
                 username: ACTUAL_USER, 
-                mac_address: MAC_ADDRESS}; 
-            await sendToServer('/api/check-in', 'POST', heartbeat); 
+                mac_address: MAC_ADDRESS,
+                clientStatus: isUserLocked() ? 'LOCKED' : 'ACTIVE' // Tell server our status
+            }; 
+            
+            const { body } = await sendToServer('/api/check-in', 'POST', heartbeat);
+            
+            // 3. Update Contact Time & Handle Commands
+            lastServerContact = Date.now();
+            try {
+                const res = JSON.parse(body);
+                if (res.command === 'LOCKDOWN') {
+                    console.log('Received LOCKDOWN command.');
+                    try { execSync(`usermod -L ${ACTUAL_USER}`); } catch(e){ console.error('Lock failed:', e.message); }
+                    try { execSync(`pkill -KILL -u ${ACTUAL_USER}`); } catch(e){ console.error('Kill failed:', e.message); }
+                } else if (res.command === 'RESET_PASSWORD') {
+                    console.log('Received RESET_PASSWORD command.');
+                    try { execSync(`usermod -U ${ACTUAL_USER}`); } catch(e){}
+                    try { execSync(`chage -d 0 ${ACTUAL_USER}`); } catch(e){}
+                    await sendToServer('/api/reset-applied', 'POST', { username: ACTUAL_USER });
+                }
+            } catch (e) { console.error('Error parsing response:', e); }
         }
     } catch (e) { 
         console.error('An error occurred during package check:', e); 
@@ -258,6 +302,41 @@ const startAgent = () => {
         }
     });
 
+    // Endpoint to update all system packages
+    app.post('/api/update-system', async (req, res) => {
+        if (isInstalling) {
+            return res.status(409).json({ error: 'An installation or update is already in progress.' });
+        }
+
+        isInstalling = true; 
+        console.log('Agent update lock acquired.');
+
+        try { 
+            console.log(`Agent received system update request from origin: ${req.get('origin')}`); 
+
+            const updateScript = path.join(__dirname, '../juan/update_system.sh'); 
+            console.log('Running system update script...'); 
+            
+            const { stdout, stderr } = await execFile('/bin/bash', [updateScript]); 
+
+            console.log('System update completed.'); 
+            if (stdout) console.log('Update output:', stdout);
+            if (stderr) console.error('Update stderr:', stderr);
+
+            logInstallation('SYSTEM_UPDATE', 'success'); 
+
+            return res.json({ message: 'System update completed successfully.', output: stdout }); 
+        } catch (err) {
+            console.error('Agent: error during system update:', err); 
+            logInstallation('SYSTEM_UPDATE', 'failure', err); 
+
+            return res.status(500).json({ error: 'System update failed.', details: err.message }); 
+        } finally { 
+            isInstalling = false; 
+            console.log('Agent update lock released.');
+        }
+    });
+
     // Forwards a support ticket request to the server
     app.post('/api/ticket', async (req, res) => {
         try {
@@ -294,10 +373,6 @@ const startAgent = () => {
             return res.status(502).json({ error: 'Error forwarding ticket to server', detail: err.message || String(err) }); 
         }
     });
-
-    // Try to start as HTTPS using server cert/key; fallback to HTTP if not available.
-    const keyPath = path.join(__dirname, 'server.key'); 
-    const certPath = path.join(__dirname, 'server.cert'); 
 
     app.listen(AGENT_PORT, '0.0.0.0', () => { 
     console.log(`Agent listening on HTTP port ${AGENT_PORT}`);

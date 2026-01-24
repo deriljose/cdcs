@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 // Import download icon for install button
-import { HardDriveDownload } from 'lucide-react';
+import { HardDriveDownload, RefreshCw } from 'lucide-react';
 import "./styles.css";
 
 const DownloadPage = () => {
@@ -10,6 +10,8 @@ const DownloadPage = () => {
     const [loading, setLoading] = useState(true);
     // Track which package is being installed
     const [installing, setInstalling] = useState(null);
+    // Flag to manage system update state
+    const [updating, setUpdating] = useState(false);
     // Error state to handle issues
     const [error, setError] = useState(null);
 
@@ -78,10 +80,56 @@ const DownloadPage = () => {
         }
     };
 
+    const handleSystemUpdate = async () => {
+        if (installing || updating) return;
+
+        if (!window.confirm("Are you sure you want to update all system packages? This process may take some time.")) {
+            return;
+        }
+
+        setUpdating(true);
+        setError(null);
+
+        // Localhost because client runs on same device as frontend
+        const clientAgentBase = `http://localhost:4001`;
+        const updateEndpoint = `${clientAgentBase}/api/update-system`;
+
+        try {
+            const res = await fetch(updateEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            });
+
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                throw new Error(data.error || `Server error: ${res.status}`);
+            }
+
+            window.alert("System update completed successfully.");
+        } catch (e) {
+            setError(`System update failed: ${e.message}`);
+        } finally {
+            setUpdating(false);
+        }
+    };
+
     return (
         <div className="download-page">
-            <h1 className="page-title">Downloads</h1>
-            <p className="page-subtitle">Packages available for download</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div>
+                    <h1 className="page-title">Downloads</h1>
+                    <p className="page-subtitle">Packages available for download</p>
+                </div>
+                <button 
+                    className="request-button" 
+                    onClick={handleSystemUpdate} 
+                    disabled={updating || !!installing}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                    <RefreshCw size={18} className={updating ? "spin" : ""} />
+                    {updating ? 'Updating...' : 'Update System'}
+                </button>
+            </div>
 
             {loading && <p>Loading packages…</p>}
             {error && <p className="error">Error: {error}</p>}
@@ -94,7 +142,7 @@ const DownloadPage = () => {
                                 <tr key={pkg._id || pkg.id || pkg.file || pkg.name}>
                                     <td>{pkg.name}</td>
                                     <td className="action-cell">
-                                        <button className="request-button install-button" onClick={() => installPackage(pkg)} disabled={installing === pkg.name}>
+                                        <button className="request-button install-button" onClick={() => installPackage(pkg)} disabled={installing === pkg.name || updating}>
                                             <HardDriveDownload />
                                             {installing === pkg.name ? 'Installing...' : 'Install'}
                                         </button>

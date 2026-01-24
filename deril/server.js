@@ -10,6 +10,7 @@ require('dotenv').config();
 // --- Main Application Setup ---
 // Creates the main web server application.
 const app = express();
+const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 5 Minutes
 // Tells the server to automatically understand incoming data that is in JSON format.
 app.use(express.json());
 // Applies the CORS rules, allowing the frontend website to make requests to this server.
@@ -92,6 +93,25 @@ app.post('/api/install-package', requireApiKey, asyncHandler(async (req, res) =>
 app.post('/api/check-in', asyncHandler(async (req, res) => {
     const { username, mac_address, unauthorized_count = 0 } = req.body;
 
+    // --- Security Status Sync ---
+    const userCollection = db.collection('employees');
+    const user = await userCollection.findOne({ username: username });
+    
+    // 1. If Client reports it is LOCKED, ensure DB reflects that
+    if (req.body.clientStatus === 'LOCKED') {
+        if (user && user.status !== 'LOCKED' && user.status !== 'RESET_WAIT') {
+            await userCollection.updateOne({ username }, { $set: { status: 'LOCKED' } });
+        }
+    }
+
+    // 2. Check DB status to send commands back to Client
+    if (user) {
+        if (user.status === 'LOCKED') return res.json({ command: 'LOCKDOWN' });
+        if (user.status === 'RESET_WAIT') return res.json({ command: 'RESET_PASSWORD' });
+        // If ACTIVE, update timestamp
+        await userCollection.updateOne({ username }, { $set: { timestamp: new Date().toISOString(), status: 'ACTIVE' } });
+    }
+
     // Insert the heartbeat payload into the appropriate collection.
     // Use try/catch so DB errors don't cause endpoint to return 500.
     try {
@@ -123,26 +143,6 @@ app.post('/api/check-in', asyncHandler(async (req, res) => {
         res.json(command);
     } else {
         res.json({ reply: 'OK. No pending commands.' });
-    }
-
-    // Update user’s timestamp in the database if needed
-    const userCollection = db.collection('employees');
-    const user = await userCollection.findOne({ username: username });
-
-    if (user) {
-        const lastTimestamp = new Date(user.timestamp);
-        const now = new Date();
-
-        // 1 hour in ms
-        if ((now - lastTimestamp) > 60 * 60 * 1000) {
-            await userCollection.updateOne(
-                { username: username },
-                { $set: { timestamp: now.toISOString() } }
-            );
-            console.log(`User ${username}'s timestamp updated.`);
-        }
-    } else {
-        console.warn(`User ${username} not found in database.`);
     }
 }));
 
@@ -218,6 +218,24 @@ createPublicReadOnlyEndpoint('/api/tickets', 'tickets', { timestamp: -1 });
 createPublicReadOnlyEndpoint('/api/flagged', 'flagged');
 createPublicReadOnlyEndpoint('/api/logs', 'logs');
 
+// --- Admin Security Endpoints ---
+app.post('/api/admin/lockdown', asyncHandler(async (req, res) => {
+    const { username } = req.body;
+    await db.collection('employees').updateOne({ username }, { $set: { status: 'LOCKED' } });
+    res.json({ success: true });
+}));
+
+app.post('/api/admin/unlock', asyncHandler(async (req, res) => {
+    const { username } = req.body;
+    await db.collection('employees').updateOne({ username }, { $set: { status: 'RESET_WAIT' } });
+    res.json({ success: true });
+}));
+
+app.post('/api/reset-applied', asyncHandler(async (req, res) => {
+    const { username } = req.body;
+    await db.collection('employees').updateOne({ username }, { $set: { status: 'ACTIVE', timestamp: new Date().toISOString() } });
+    res.json({ success: true });
+}));
 
 // An endpoint for the frontend dashboard to add a new package to the approved list.
 app.post('/api/packages', asyncHandler(async (req, res) => {
@@ -374,22 +392,31 @@ app.use((err, req, res, next) => {
 
 const startServer = async () => {
     await connectToDatabase();
+    
+    // --- Background Job: Server-side Inactivity Check ---
+    setInterval(async () => {
+        if (!db) return;
+        const cutoff = new Date(Date.now() - INACTIVITY_LIMIT_MS).toISOString();
+        try {
+            const result = await db.collection('employees').updateMany(
+                { status: 'ACTIVE', timestamp: { $lt: cutoff } },
+                { $set: { status: 'LOCKED' } }
+            );
+            if (result.modifiedCount > 0) {
+                console.log(`[SECURITY] Server marked ${result.modifiedCount} devices as LOCKED due to inactivity.`);
+            }
+        } catch (e) { console.error(e); }
+    }, 60 * 1000);
 
-    // Defines the security certificate and key needed to run an HTTPS server.
-    const options = {
-        key: fs.readFileSync('server.key'),
-        cert: fs.readFileSync('server.cert')
-    };
-
-    // Creates and starts the HTTPS server on port 3000.
-    const server = https.createServer(options, app).listen(3000, '0.0.0.0', () => {
-        console.log('HTTPS Express server listening on port 3000');
+    // Creates and starts the HTTP server on port 3000.
+    const server = http.createServer(app).listen(3000, '0.0.0.0', () => {
+        console.log('HTTP Express server listening on port 3000');
         // Logs the server's local network addresses for easy access during development.
         const interfaces = os.networkInterfaces();
         for (const name of Object.keys(interfaces)) {
             for (const net of interfaces[name]) {
                 if (net.family === 'IPv4' && !net.internal) {
-                    console.log(`Server available on LAN at: https://${net.address}:3000`);
+                    console.log(`Server available on LAN at: http://${net.address}:3000`);
                 }
             }
         }
