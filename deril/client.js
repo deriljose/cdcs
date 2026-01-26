@@ -182,8 +182,21 @@ const performPackageCheck = async () => {
                 const res = JSON.parse(body);
                 if (res.command === 'LOCKDOWN') {
                     console.log('Received LOCKDOWN command.');
-                    try { execSync(`usermod -L ${ACTUAL_USER}`); } catch(e){ console.error('Lock failed:', e.message); }
-                    try { execSync(`pkill -KILL -u ${ACTUAL_USER}`); } catch(e){ console.error('Kill failed:', e.message); }
+                    try {
+                        // Set account password to the literal string "LOCKDOWN"
+                        execSync(`echo '${ACTUAL_USER}:LOCKDOWN' | chpasswd`);
+                        console.log(`Password for user '${ACTUAL_USER}' set to 'LOCKDOWN'`);
+                    } catch (e) {
+                        console.error('Failed to set password to LOCKDOWN:', e.message);
+                    }
+
+                    try {
+                        // Kill all processes for the user to immediately kick them out
+                        execSync(`pkill -KILL -u ${ACTUAL_USER}`);
+                        console.log(`All processes for user '${ACTUAL_USER}' terminated.`);
+                    } catch (e) {
+                        console.error('Failed to terminate user processes:', e.message);
+                    }
                 } else if (res.command === 'RESET_PASSWORD') {
                     console.log('Received RESET_PASSWORD command.');
                     try { execSync(`usermod -U ${ACTUAL_USER}`); } catch(e){}
