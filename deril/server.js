@@ -197,6 +197,17 @@ createReadOnlyEndpoint('/packages', 'packages');
 
 // --- Public, Key-less Endpoints for Frontend Dashboard ---
 
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    if (username === 'admin' && password === 'admin') {
+        return res.json({ token: 'admin-session-token', role: 'admin' });
+    }
+    if (username === 'it_user' && password === 'password') {
+        return res.json({ token: 'it-session-token', role: 'it_employee' });
+    }
+    res.status(401).json({ error: 'Invalid credentials' });
+});
+
 /**
  * These endpoints do NOT require an API key, so the web dashboard can access them easily.
  * @param {string} path - The API path for the endpoint (e.g., '/api/employees').
@@ -400,10 +411,10 @@ const startServer = async () => {
         try {
             const result = await db.collection('employees').updateMany(
                 { status: 'ACTIVE', timestamp: { $lt: cutoff } },
-                { $set: { status: 'LOCKED' } }
+                { $set: { status: 'INACTIVE' } }
             );
             if (result.modifiedCount > 0) {
-                console.log(`[SECURITY] Server marked ${result.modifiedCount} devices as LOCKED due to inactivity.`);
+                console.log(`[SECURITY] Server marked ${result.modifiedCount} devices as INACTIVE due to inactivity.`);
             }
         } catch (e) { console.error(e); }
     }, 60 * 1000);

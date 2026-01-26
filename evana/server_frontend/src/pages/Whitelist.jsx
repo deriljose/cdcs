@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./Whitelist.css";
 
-const Whitelist = () => {
+const Whitelist = ({ role }) => {
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -73,6 +73,7 @@ const Whitelist = () => {
         Packages allowed for download
       </p>
 
+      {role === 'admin' && (
       <div className="form-card">
         <h3>Add a new package</h3>
         <form onSubmit={handleAddPackage} className="add-package-form">
@@ -93,6 +94,7 @@ const Whitelist = () => {
           </button>
         </form>
       </div>
+      )}
 
       <div className="list-card">
         {loading && <p className="loading-message">Loading packages...</p>}
@@ -104,9 +106,11 @@ const Whitelist = () => {
                 <tr key={pkg._id}>
                   <td className="package-name-cell">{pkg.name}</td>
                   <td className="actions-cell">
+                    {role === 'admin' && (
                     <button onClick={() => handleDeletePackage(pkg._id)} className="delete-btn">
                       Delete
                     </button>
+                    )}
                   </td>
                 </tr>
               ))}

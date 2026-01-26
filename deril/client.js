@@ -125,9 +125,7 @@ const performPackageCheck = async () => {
     
     // 1. Dead Man's Switch: Lock if no server contact for 30 minutes
     if (Date.now() - lastServerContact > 30 * 60 * 1000) {
-        console.error('Lost connection to server for too long. Locking device.');
-        try { execSync(`usermod -L ${ACTUAL_USER}`); } catch(e){ console.error('Lock failed:', e.message); }
-        try { execSync(`pkill -KILL -u ${ACTUAL_USER}`); } catch(e){ console.error('Kill failed:', e.message); }
+        console.warn('Warning: Lost connection to server for over 30 minutes.');
     }
 
     try {

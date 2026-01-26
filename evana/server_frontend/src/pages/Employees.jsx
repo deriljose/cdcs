@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Lock, Unlock, RefreshCw } from 'lucide-react';
 
-const Employees = () => {
+const Employees = ({ role }) => {
     const [employees, setEmployees] = useState([]);
     const [loading, setLoading] = useState(false);
 
@@ -65,6 +65,7 @@ const Employees = () => {
                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
                                         emp.status === 'LOCKED' ? 'bg-red-100 text-red-800' : 
                                         emp.status === 'RESET_WAIT' ? 'bg-yellow-100 text-yellow-800' : 
+                                        emp.status === 'INACTIVE' ? 'bg-gray-100 text-gray-800' : 
                                         'bg-green-100 text-green-800'
                                     }`}>
                                         {emp.status || 'ACTIVE'}
@@ -75,6 +76,8 @@ const Employees = () => {
                                 </td>
                                 <td className="px-5 py-5 border-b border-gray-200 text-sm">
                                     <div className="flex gap-2">
+                                        {role === 'admin' && (
+                                        <>
                                         <button 
                                             onClick={() => handleAction('lockdown', emp.username)}
                                             disabled={loading || emp.status === 'LOCKED'}
@@ -91,6 +94,8 @@ const Employees = () => {
                                         >
                                             <Unlock size={18} />
                                         </button>
+                                        </>
+                                        )}
                                     </div>
                                 </td>
                             </tr>
