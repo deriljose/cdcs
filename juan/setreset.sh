@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Policy switches
-ALLOW_REAL_SETUP=false
+ALLOW_REAL_SETUP=true
 ALLOW_REAL_RESET=false
 
 set -e
