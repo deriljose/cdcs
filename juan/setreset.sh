@@ -64,11 +64,16 @@ setup_all() {
     run_cmd sudo cp /home/juan/cdcs/deril/.env /opt/cdcs/deril/
     run_cmd sudo cp /home/juan/cdcs/deril/package.json /opt/cdcs/deril/
     
-    # 3. Script Deployment
+    # 3. Script Deployment (Pulls from juan folder, deploys to /opt/cdcs/juan)
     echo " Deploying helper scripts to /opt/cdcs/juan/..."
-    # Wrap in bash -c to handle the wildcard correctly with sudo
-    run_cmd sudo bash -c "cp /home/juan/cdcs/deril/*.sh /opt/cdcs/juan/"
-    run_cmd sudo bash -c "cp /home/juan/cdcs/deril/*.txt /opt/cdcs/juan/"
+    # Use bash -c to ensure the wildcard (*) expands correctly with sudo
+    run_cmd sudo bash -c "cp /home/juan/cdcs/juan/*.sh /opt/cdcs/juan/"
+    
+    # Check if any .txt files exist before copying to avoid errors
+    if ls /home/juan/cdcs/juan/*.txt >/dev/null 2>&1; then
+        run_cmd sudo bash -c "cp /home/juan/cdcs/juan/*.txt /opt/cdcs/juan/"
+    fi
+
     run_cmd sudo chmod +x /opt/cdcs/juan/*.sh
 
     # 4. Dependency Handling
