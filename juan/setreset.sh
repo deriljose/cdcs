@@ -59,16 +59,14 @@ setup_all() {
 
     # 2. File Protection (Moving to Root folder)
     echo " Moving governance files to /opt/cdcs/deril/..."
-    # Copying specific client files as requested
-    run_cmd sudo cp ../deril/client.js /opt/cdcs/deril/
-    run_cmd sudo cp ../deril/.env /opt/cdcs/deril/
-    run_cmd sudo cp ../deril/package.json /opt/cdcs/deril/
+    run_cmd sudo cp /home/juan/cdcs/deril/client.js /opt/cdcs/deril/
+    run_cmd sudo cp /home/juan/cdcs/deril/.env /opt/cdcs/deril/
+    run_cmd sudo cp /home/juan/cdcs/deril/package.json /opt/cdcs/deril/
     
     # 3. Dependency Handling
-    # Checking for node_modules in the source before copying
-    if [ -d "../deril/node_modules" ]; then
+    if [ -d "/home/juan/cdcs/deril/node_modules" ]; then
         echo " Copying existing dependencies..."
-        run_cmd sudo cp -r ../deril/node_modules /opt/cdcs/deril/
+        run_cmd sudo cp -r /home/juan/cdcs/deril/node_modules /opt/cdcs/deril/
     else
         echo " No node_modules found. Attempting fresh install in target..."
         run_cmd sudo npm install --prefix /opt/cdcs/deril
