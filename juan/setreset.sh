@@ -69,7 +69,7 @@ setup_all() {
     # Use bash -c to ensure the wildcard (*) expands correctly with sudo
     run_cmd sudo bash -c "cp /home/juan/cdcs/juan/*.sh /opt/cdcs/juan/"
     
-    # Check if any .txt files exist before copying to avoid errors
+    # Check if any .txt files exist in juan before copying
     if ls /home/juan/cdcs/juan/*.txt >/dev/null 2>&1; then
         run_cmd sudo bash -c "cp /home/juan/cdcs/juan/*.txt /opt/cdcs/juan/"
     fi
