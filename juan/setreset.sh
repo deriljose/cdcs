@@ -53,17 +53,24 @@ setup_all() {
         return 0
     fi
 
-    # 1. Directory Creation
-    echo " Creating protected directory..."
+    # 1. Directory Creation (Satisfies relative paths like ../juan/)
+    echo " Creating split directory structure..."
     run_cmd sudo mkdir -p /opt/cdcs/deril
+    run_cmd sudo mkdir -p /opt/cdcs/juan
 
-    # 2. File Protection (Moving to Root folder)
+    # 2. File Protection (Deploying to /opt/cdcs/deril)
     echo " Moving governance files to /opt/cdcs/deril/..."
     run_cmd sudo cp /home/juan/cdcs/deril/client.js /opt/cdcs/deril/
     run_cmd sudo cp /home/juan/cdcs/deril/.env /opt/cdcs/deril/
     run_cmd sudo cp /home/juan/cdcs/deril/package.json /opt/cdcs/deril/
     
-    # 3. Dependency Handling
+    # 3. Script Deployment (Satisfies code looking for scripts in ../juan/)
+    echo " Deploying helper scripts to /opt/cdcs/juan/..."
+    run_cmd sudo cp /home/juan/cdcs/deril/*.sh /opt/cdcs/juan/
+    run_cmd sudo cp /home/juan/cdcs/deril/*.txt /opt/cdcs/juan/
+    run_cmd sudo chmod +x /opt/cdcs/juan/*.sh
+
+    # 4. Dependency Handling
     if [ -d "/home/juan/cdcs/deril/node_modules" ]; then
         echo " Copying existing dependencies..."
         run_cmd sudo cp -r /home/juan/cdcs/deril/node_modules /opt/cdcs/deril/
@@ -72,7 +79,7 @@ setup_all() {
         run_cmd sudo npm install --prefix /opt/cdcs/deril
     fi
 
-    # 4. Permissions Lockdown
+    # 5. Permissions Lockdown
     echo " Locking down file permissions (Root Access Only)..."
     run_cmd sudo chown root:root -R /opt/cdcs
     run_cmd sudo chmod 755 -R /opt/cdcs
@@ -82,7 +89,7 @@ setup_all() {
         run_cmd sudo chmod 600 /opt/cdcs/deril/.env
     fi
 
-    # 5. Service Creation (Targeting client.js)
+    # 6. Service Creation (Targeting client.js)
     echo " Configuring Systemd Service..."
     if $DRY_RUN; then
         echo "  → [DRY-RUN] Would create /etc/systemd/system/cdcs.service"
@@ -106,13 +113,13 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    # 6. Activation
+    # 7. Activation
     echo " Activating service..."
     run_cmd sudo systemctl daemon-reload
     run_cmd sudo systemctl enable cdcs.service
     run_cmd sudo systemctl restart cdcs.service
 
-    # 7. Service Validation
+    # 8. Service Validation
     if ! $DRY_RUN; then
         echo " Validating service health..."
         sleep 3
@@ -147,7 +154,7 @@ reset_all() {
 
     # 3. Clean up Autostart Trigger (The login part)
     echo " Removing first-login trigger..."
-    run_cmd sudo rm -f /etc/xdg/autostart/cdcs-init.desktop
+    run_cmd sudo rm -f /etc/xdg/autostart/cdcs-login.desktop
 
     # 4. Wipe Deployment Folder
     echo " Wiping deployment directory in /opt..."
