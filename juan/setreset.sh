@@ -2,10 +2,11 @@
 
 # Policy switches
 ALLOW_REAL_SETUP=true
-ALLOW_REAL_RESET=false
+ALLOW_REAL_RESET=true
 
 set -e
 
+# Basic argument check
 if [ $# -lt 1 ]; then
     echo "Usage: $0 {setup|reset} [--dry-run]"
     exit 1
@@ -14,6 +15,7 @@ fi
 MODE="$1"
 shift || true
 
+# Check for dry-run flag
 DRY_RUN=false
 for arg in "$@"; do
     if [ "$arg" = "--dry-run" ]; then
@@ -21,9 +23,10 @@ for arg in "$@"; do
     fi
 done
 
+# Command runner helper
 run_cmd() {
     if $DRY_RUN; then
-        echo "  → Would run: $*"
+        echo "  → [DRY-RUN] Would run: $*"
     else
         echo "  → Running: $*"
         "$@"
@@ -32,105 +35,111 @@ run_cmd() {
 
 echo ""
 echo " Starting CDCS Script"
-echo "Mode: $MODE | Test Mode: $DRY_RUN"
-echo ""
+echo "Mode: $MODE | Dry Run: $DRY_RUN"
+echo "--------------------------------"
 
 setup_all() {
-
     echo "SETUP REQUEST RECEIVED"
-    echo "--------------------------------"
-    echo "Policy      : SIMULATION MODE"
-    echo "Reason      : Device provisioning requested"
     echo "Timestamp   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "Hostname    : $(hostname)"
     echo "User        : ${SUDO_USER:-$USER}"
     echo "--------------------------------"
 
-    if [ "$ALLOW_REAL_SETUP" != "true" ]; then
-        echo "[CDCS] Real setup is DISABLED by policy."
-        echo "[CDCS] No system changes executed."
-        echo "[CDCS] Setup acknowledged."
-        echo ""
+    if [ "$ALLOW_REAL_SETUP" != "true" ] && ! $DRY_RUN; then
+        echo "[CDCS] Real setup is DISABLED by policy. No changes made."
         return 0
     fi
 
-    echo " SETTING UP YOUR SYSTEM"
-    echo "=========================="
-    echo ""
+    # 1. Directory Creation
+    echo " Creating protected directory..."
+    run_cmd sudo mkdir -p /opt/cdcs/deril
 
-    echo "  Updating software packages..."
-    run_cmd sudo apt update -y
+    # 2. File Protection (Moving to Root folder)
+    echo " Moving governance files to /opt/cdcs/deril/..."
+    run_cmd sudo cp ../deril/client.js /opt/cdcs/deril/
+    run_cmd sudo cp ../deril/.env /opt/cdcs/deril/
+    run_cmd sudo cp ../deril/package.json /opt/cdcs/deril/
+    
+    if [ -d "../deril/node_modules" ]; then
+        echo " Copying dependencies..."
+        run_cmd sudo cp -r ../deril/node_modules /opt/cdcs/deril/
+    fi
 
-    echo ""
-    echo "  Installing firewall..."
-    run_cmd sudo apt install -y ufw
-    run_cmd sudo ufw default deny incoming
-    run_cmd sudo ufw default allow outgoing
-    run_cmd sudo ufw allow 22/tcp
-    run_cmd sudo ufw --force enable
+    # 3. Permissions
+    echo " Locking down file permissions..."
+    run_cmd sudo chown root:root -R /opt/cdcs
+    run_cmd sudo chmod 755 -R /opt/cdcs
+    if [ -f "../deril/.env" ] || $DRY_RUN; then
+        run_cmd sudo chmod 600 /opt/cdcs/deril/.env
+    fi
 
-    echo ""
-    echo " Installing security protection (Fail2Ban)..."
-    run_cmd sudo apt install -y fail2ban
-
+    # 4. Service Creation
+    echo " Configuring Systemd Service..."
     if $DRY_RUN; then
-        echo "  → Would create security config file"
+        echo "  → [DRY-RUN] Would create /etc/systemd/system/cdcs.service"
     else
-        sudo tee /etc/fail2ban/jail.local > /dev/null << 'EOF'
-[sshd]
-enabled = true
-port    = ssh
-filter  = sshd
-logpath = /var/log/auth.log
-maxretry = 5
-bantime = 3600
+        sudo tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
+[Unit]
+Description=CDCS: Centralized Linux Endpoint Client
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/opt/cdcs/deril
+ExecStart=/usr/bin/node /opt/cdcs/deril/client.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
 EOF
     fi
 
-    run_cmd sudo systemctl restart fail2ban
+    # 5. Activation
+    echo " Activating service..."
+    run_cmd sudo systemctl daemon-reload
+    run_cmd sudo systemctl enable cdcs.service
+    run_cmd sudo systemctl restart cdcs.service
 
-    echo ""
-    echo " Setting up automatic security updates..."
-    run_cmd sudo apt install -y unattended-upgrades
-    run_cmd sudo dpkg-reconfigure --priority=low unattended-upgrades
-
-    if $DRY_RUN; then
-        echo "  → Would create auto-update config"
-    else
-        sudo tee /etc/apt/apt.conf.d/20auto-upgrades > /dev/null << 'EOF'
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-APT::Periodic::Download-Upgradeable-Packages "1";
-APT::Periodic::AutocleanInterval "7";
-EOF
+    # 6. Service Validation
+    if ! $DRY_RUN; then
+        echo " Validating service health..."
+        sleep 2
+        if systemctl is-active --quiet cdcs.service; then
+            echo " [OK] CDCS Client is running successfully."
+        else
+            echo " [ERROR] CDCS Client failed to start. Check 'sudo journalctl -u cdcs.service'"
+        fi
     fi
 
     echo ""
-    echo " SETUP COMPLETE!"
-    echo ""
+    echo " SETUP SEQUENCE FINISHED"
 }
 
 reset_all() {
-    echo "[CDCS] RESET REQUEST RECEIVED"
-    echo "--------------------------------"
-    echo "Policy      : SIMULATION MODE"
-    echo "Reason      : Remote reset requested by server"
-    echo "Timestamp   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "Hostname    : $(hostname)"
-    echo "User        : ${SUDO_USER:-$USER}"
+    echo "RESET REQUEST RECEIVED"
     echo "--------------------------------"
 
-    if [ "$ALLOW_REAL_RESET" != "true" ]; then
+    if [ "$ALLOW_REAL_RESET" != "true" ] && ! $DRY_RUN; then
         echo "[CDCS] Real reset is DISABLED by policy."
-        echo "[CDCS] No destructive actions executed."
-        echo "[CDCS] Reset acknowledged."
         return 0
     fi
+
+    echo " Stopping and removing CDCS Client..."
+    run_cmd sudo systemctl stop cdcs.service
+    run_cmd sudo systemctl disable cdcs.service
+    
+    echo " Deleting files and service configurations..."
+    run_cmd sudo rm -f /etc/systemd/system/cdcs.service
+    run_cmd sudo rm -rf /opt/cdcs
+    run_cmd sudo systemctl daemon-reload
+
+    echo " RESET COMPLETE"
 }
 
 case "$MODE" in
-    setup) setup_all  ;;
-    reset) reset_all  ;;
+    setup) setup_all ;;
+    reset) reset_all ;;
     *)
         echo "Usage: $0 {setup|reset} [--dry-run]"
         exit 1
