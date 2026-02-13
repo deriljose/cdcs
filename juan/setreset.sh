@@ -1,21 +1,35 @@
 #!/bin/bash
 
-# Policy switches
+# Role-Based Access: Requires Root (IT Admin) Privileges
+
+
+# 1. PRIVILEGE CHECK: Enforcement of Role-Based Access
+# only IT Admins (root) can modify system state.
+if [[ $EUID -ne 0 ]]; then
+   echo "CRITICAL ERROR: This script must be run with Root privileges (IT Admin)."
+   echo "Access Denied for user: $USER"
+   exit 1
+fi
+
+# 2. PORTABILITY: Set working directory to the script's own location
+# This ensures relative paths (../deril) work on any VM or username.
+cd "$(dirname "$0")"
+
+# Policy switches for internal governance
 ALLOW_REAL_SETUP=true
 ALLOW_REAL_RESET=true
 
 set -e
 
-# Basic argument check
+# --- ARGUMENT HANDLING ---
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 {setup|reset} [--dry-run]"
+    echo "Usage: sudo $0 {setup|reset} [--dry-run]"
     exit 1
 fi
 
 MODE="$1"
 shift || true
 
-# Check for dry-run flag
 DRY_RUN=false
 for arg in "$@"; do
     if [ "$arg" = "--dry-run" ]; then
@@ -23,7 +37,7 @@ for arg in "$@"; do
     fi
 done
 
-# Command runner helper
+# Command execution wrapper
 run_cmd() {
     if $DRY_RUN; then
         echo "  → [DRY-RUN] Would run: $*"
@@ -34,63 +48,73 @@ run_cmd() {
 }
 
 echo ""
-echo " Starting CDCS Script"
-echo "Mode: $MODE | Dry Run: $DRY_RUN"
+echo " Starting CDCS Governance Module"
+echo " Access Level: ADMINISTRATIVE (ROOT)"
+echo " Mode: $MODE | Dry Run: $DRY_RUN"
 echo "--------------------------------"
 
 setup_all() {
+    # Idempotency check: prevent re-installing over a live system
     if [ -f "/opt/cdcs/deril/client.js" ]; then
-        echo "CDCS: Already installed. Skipping setup."
+        echo "CDCS: Governance layer already installed. Skipping setup."
         exit 0
     fi
+    
     echo "SETUP REQUEST RECEIVED"
     echo "Timestamp   : $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "User        : ${SUDO_USER:-$USER}"
+    echo "Operator    : ${SUDO_USER:-$USER}"
     echo "--------------------------------"
 
     if [ "$ALLOW_REAL_SETUP" != "true" ] && ! $DRY_RUN; then
-        echo "[CDCS] Real setup is DISABLED by policy. No changes made."
+        echo "Setup is disabled by internal policy."
         return 0
     fi
 
-    # 1. Directory Creation
-    echo " Creating protected directory..."
-    run_cmd sudo mkdir -p /opt/cdcs/deril
+    # 1. Establish Software Baseline
+    echo " Capturing initial software baseline..."
+    run_cmd mkdir -p /opt/cdcs/juan
+    if ! $DRY_RUN; then
+        # Creates the reference map used by the reset protocol to identify deviations
+        apt-mark showmanual | sort > ./baseline_packages.txt
+    fi
 
-    # 2. File Protection (Moving to Root folder)
-    echo " Moving governance files to /opt/cdcs/deril/..."
-    # Copying specific client files as requested
-    run_cmd sudo cp ../deril/client.js /opt/cdcs/deril/
-    run_cmd sudo cp ../deril/.env /opt/cdcs/deril/
-    run_cmd sudo cp ../deril/package.json /opt/cdcs/deril/
+    # 2. Directory Initialization
+    echo " Initializing protected system directories in /opt..."
+    run_cmd mkdir -p /opt/cdcs/deril
+    run_cmd mkdir -p /opt/cdcs/juan
+
+    # 3. Governance Deployment (Using relative paths for portability)
+    echo " Deploying core binaries to /opt/cdcs/deril/..."
+    run_cmd cp ../deril/client.js /opt/cdcs/deril/
+    run_cmd cp ../deril/.env /opt/cdcs/deril/
+    run_cmd cp ../deril/package.json /opt/cdcs/deril/
     
-    # 3. Dependency Handling
-    # Checking for node_modules in the source before copying
+    # 4. Script Deployment
+    echo " Deploying administrative scripts to /opt/cdcs/juan/..."
+    run_cmd bash -c "cp ./*.sh /opt/cdcs/juan/"
+    run_cmd bash -c "cp ./*.txt /opt/cdcs/juan/"
+    run_cmd chmod +x /opt/cdcs/juan/*.sh
+
+    # 5. Dependency Management
     if [ -d "../deril/node_modules" ]; then
-        echo " Copying existing dependencies..."
-        run_cmd sudo cp -r ../deril/node_modules /opt/cdcs/deril/
+        echo " Migrating local dependencies..."
+        run_cmd cp -r ../deril/node_modules /opt/cdcs/deril/
     else
-        echo " No node_modules found. Attempting fresh install in target..."
-        run_cmd sudo npm install --prefix /opt/cdcs/deril
+        echo " No dependencies found locally. Performing network install..."
+        run_cmd npm install --prefix /opt/cdcs/deril
     fi
 
-    # 4. Permissions Lockdown
-    echo " Locking down file permissions (Root Access Only)..."
-    run_cmd sudo chown root:root -R /opt/cdcs
-    run_cmd sudo chmod 755 -R /opt/cdcs
-    
-    # Secure the .env file so it is only readable by root
-    if [ -f "/opt/cdcs/deril/.env" ] || $DRY_RUN; then
-        run_cmd sudo chmod 600 /opt/cdcs/deril/.env
-    fi
+    # 6. Security Hardening
+    # Ensures the employee cannot read the .env or modify governance files
+    echo " Hardening file permissions..."
+    run_cmd chown root:root -R /opt/cdcs
+    run_cmd chmod 755 -R /opt/cdcs
+    run_cmd chmod 600 /opt/cdcs/deril/.env
 
-    # 5. Service Creation (Targeting client.js)
-    echo " Configuring Systemd Service..."
-    if $DRY_RUN; then
-        echo "  → [DRY-RUN] Would create /etc/systemd/system/cdcs.service"
-    else
-        # Correcting ExecStart to target client.js instead of server.js
-        sudo tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
+    # 7. Persistence Logic (Systemd)
+    echo " Registering Systemd governance service..."
+    if ! $DRY_RUN; then
+        tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
 Description=CDCS: Centralized Linux Endpoint Client
 After=network.target
@@ -108,65 +132,58 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    # 6. Activation
-    echo " Activating service..."
-    run_cmd sudo systemctl daemon-reload
-    run_cmd sudo systemctl enable cdcs.service
-    run_cmd sudo systemctl restart cdcs.service
+    # 8. Service Activation
+    run_cmd systemctl daemon-reload
+    run_cmd systemctl enable cdcs.service
+    run_cmd systemctl restart cdcs.service
 
-    # 7. Service Validation
-    if ! $DRY_RUN; then
-        echo " Validating service health..."
-        sleep 3
-        if systemctl is-active --quiet cdcs.service; then
-            echo " [OK] CDCS Client is running successfully."
-        else
-            echo " [ERROR] CDCS Client failed to start."
-            echo " Check logs: sudo journalctl -u cdcs.service -n 20 --no-pager"
-        fi
-    fi
-
-    echo " Creating completion flag..."
-    run_cmd touch /home/juan/cdcs/juan/.provisioned
+    # 9. State Persistence
+    run_cmd touch ./.provisioned
     
-    echo ""
-    echo " SETUP SEQUENCE FINISHED"
+    echo " SETUP SEQUENCE FINISHED: Endpoint is now under governance."
 }
 
 reset_all() {
-    echo "RESET REQUEST RECEIVED"
+    echo "--------------------------------"
+    echo "INITIATING SYSTEM SANITIZATION"
+    echo "REASON: ADMINISTRATIVE OFFBOARDING / TERMINATION"
     echo "--------------------------------"
 
-    # 1. Stop and Disable the service
-    echo " Stopping background services..."
-    run_cmd sudo systemctl stop cdcs.service
-    run_cmd sudo systemctl disable cdcs.service
+    # 1. Baseline Enforcement
+    echo " Reverting system to authorized software baseline..."
+    # Purge common deviations that might bypass standard package comparison
+    run_cmd snap remove code 2>/dev/null || true
+    run_cmd apt-get purge -y code vlc htop 2>/dev/null || true
+
+    if [ -f "/opt/cdcs/juan/delete_packages.sh" ]; then
+        run_cmd /opt/cdcs/juan/delete_packages.sh
+    fi
+
+    # 2. Metadata Purge
+    echo " Sanitizing application caches and history..."
+    run_cmd rm -rf ~/.mozilla/firefox/*.default-release/*
+    run_cmd rm -rf ~/.config/google-chrome/Default/*
+    run_cmd rm -rf ~/.vscode
+    run_cmd rm -rf ~/.config/Code
+
+    # 3. User Data Wipe
+    echo " Clearing user-generated files and downloads..."
+    # Wipes all standard personal directories
+    run_cmd rm -rf ~/Documents/*
+    run_cmd rm -rf ~/Downloads/*
+    run_cmd rm -rf ~/Pictures/*
+    run_cmd rm -rf ~/Desktop/* # 4. Forensics/History Erasure
+    echo " Wiping session command history..."
+    if ! $DRY_RUN; then
+        history -c && history -w
+    fi
+    run_cmd rm -rf /tmp/*
     
-    # 2. Remove System Configurations
-    echo " Deleting service configurations..."
-    run_cmd sudo rm -f /etc/systemd/system/cdcs.service
-    run_cmd sudo systemctl daemon-reload
-
-    # 3. Clean up Autostart Trigger (The login part)
-    echo " Removing first-login trigger..."
-    run_cmd sudo rm -f /etc/xdg/autostart/cdcs-init.desktop
-
-    # 4. Wipe Deployment Folder
-    echo " Wiping deployment directory in /opt..."
-    run_cmd sudo rm -rf /opt/cdcs
-
-    # 5. Clear Local Flags
-    echo " Clearing provisioning flags..."
-    run_cmd sudo rm -f /home/juan/cdcs/juan/.provisioned
-
-    echo "--- RESET COMPLETE ---"
+    echo "--- RESET COMPLETE: USER DATA REMOVED, CDCS PERSISTED ---"
 }
 
 case "$MODE" in
     setup) setup_all ;;
     reset) reset_all ;;
-    *)
-        echo "Usage: $0 {setup|reset} [--dry-run]"
-        exit 1
-        ;;
+    *) echo "Usage: sudo $0 {setup|reset} [--dry-run]"; exit 1 ;;
 esac
