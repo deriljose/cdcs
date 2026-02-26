@@ -1,3 +1,5 @@
+# Force the script to use its own location as the starting point
+cd "$(dirname "$0")"
 #!/bin/bash
 
 # Role-Based Access: Requires Root (IT Admin) Privileges
@@ -181,7 +183,6 @@ reset_all() {
     
     echo "--- RESET COMPLETE: USER DATA REMOVED, CDCS PERSISTED ---"
 }
-
 case "$MODE" in
     setup) setup_all ;;
     reset) reset_all ;;
