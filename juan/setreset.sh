@@ -43,7 +43,7 @@ setup_all() {
     systemctl start fail2ban
 
     echo "--- PHASE 2: VAULTING & PERSISTENCE ---"
-    # Moves the agent to the internal protected drive
+    # Moves the client to the internal protected drive
     mkdir -p /opt/cdcs/deril
     cp ../deril/client.js /opt/cdcs/deril/
     cp ../deril/.env /opt/cdcs/deril/
