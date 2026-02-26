@@ -1,3 +1,5 @@
+# Force the script to use its own location as the starting point
+cd "$(dirname "$0")"
 #!/bin/bash
 
 # Policy switches
@@ -145,34 +147,40 @@ EOF
 }
 
 reset_all() {
-    echo "RESET REQUEST RECEIVED"
+    echo "--------------------------------"
+    echo "INITIATING SYSTEM SANITIZATION"
+    echo "STATE: RESTORING TO POST-SETUP BASELINE"
     echo "--------------------------------"
 
-    # 1. Stop and Disable the service
-    echo " Stopping background services..."
-    run_cmd sudo systemctl stop cdcs.service
-    run_cmd sudo systemctl disable cdcs.service
+    # 1. Software Baseline Enforcement
+    echo " Removing unauthorized user-installed packages..."
+    # This calls your script to uninstall everything not in the original whitelist
+    if [ -f "/opt/cdcs/juan/delete_packages.sh" ]; then
+        sudo /opt/cdcs/juan/delete_packages.sh
+    fi
+
+    # 2. Browser Sanitization (Cleaning without Deleting)
+    echo " Sanitizing web browser data (Profiles, History, Cookies)..."
+    # This clears Firefox/Chrome profiles without deleting the application itself
+    rm -rf ~/.mozilla/firefox/*.default-release/*
+    rm -rf ~/.config/google-chrome/Default/*
+
+    # 3. User Directory Purge
+    echo " Clearing user-generated files and downloads..."
+    # Cleans the standard folders to look 'out-of-the-box'
+    rm -rf ~/Documents/*
+    rm -rf ~/Downloads/*
+    rm -rf ~/Pictures/*
+    rm -rf ~/Desktop/* # 4. System Logs and History
+    echo " Wiping session metadata and command history..."
+    history -c && history -w
+    sudo rm -rf /tmp/*
     
-    # 2. Remove System Configurations
-    echo " Deleting service configurations..."
-    run_cmd sudo rm -f /etc/systemd/system/cdcs.service
-    run_cmd sudo systemctl daemon-reload
+    # NOTE: We do NOT delete /opt/cdcs or the systemd service. 
+    # The 'Governance Layer' remains active.
 
-    # 3. Clean up Autostart Trigger (The login part)
-    echo " Removing first-login trigger..."
-    run_cmd sudo rm -f /etc/xdg/autostart/cdcs-login.desktop
-
-    # 4. Wipe Deployment Folder
-    echo " Wiping deployment directory in /opt..."
-    run_cmd sudo rm -rf /opt/cdcs
-
-    # 5. Clear Local Flags
-    echo " Clearing provisioning flags..."
-    run_cmd sudo rm -f /home/juan/cdcs/juan/.provisioned
-
-    echo "--- RESET COMPLETE ---"
+    echo "--- RESET COMPLETE: SYSTEM RESTORED TO FRESH STATE ---"
 }
-
 case "$MODE" in
     setup) setup_all ;;
     reset) reset_all ;;
