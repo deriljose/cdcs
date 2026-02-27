@@ -1,16 +1,9 @@
-#!/bin/bash
-
-# =================================================================
-# CDCS: Vault-Centric Governance Module
-# Architecture: Root-Only Execution & Multi-User Provisioning
-# =================================================================
-
 if [[ $EUID -ne 0 ]]; then
    echo "CRITICAL ERROR: This script must be run with sudo."
    exit 1
 fi
 
-# 1. THE VAULTING (Master Source in /root)
+# 1. THE VAULTING
 VAULT_ROOT="/root/cdcs"
 VAULT_JUAN="$VAULT_ROOT/juan"
 CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,7 +13,6 @@ if [ "$CURRENT_DIR" != "$VAULT_JUAN" ]; then
     mkdir -p "$VAULT_ROOT"
     cp -r "$CURRENT_DIR/.."/* "$VAULT_ROOT/"
     chmod +x "$VAULT_JUAN/setreset.sh"
-    echo "[STAGING] Vault secured. Re-executing..."
     exec "$VAULT_JUAN/setreset.sh" "$@"
 fi
 
@@ -29,39 +21,39 @@ set -e
 
 setup_all() {
     echo "--- PHASE 1: USER PROVISIONING ---"
-    # Create Admin (with sudo) and Employee (standard user)
-    if ! id "cdcs_admin" &>/dev/null; then
-        useradd -m -s /bin/bash cdcs_admin
-        echo "cdcs_admin:admin123" | chpasswd
-        usermod -aG sudo cdcs_admin
-        echo "Admin 'cdcs_admin' created."
-    fi
+    # Create Admin and Employee
+    for user in cdcs_admin cdcs_employee; do
+        if ! id "$user" &>/dev/null; then
+            useradd -m -s /bin/bash "$user"
+            echo "$user:${user}123" | chpasswd
+            [[ "$user" == "cdcs_admin" ]] && usermod -aG sudo "$user"
+            echo "User '$user' created."
+        fi
+    done
 
-    if ! id "cdcs_employee" &>/dev/null; then
-        useradd -m -s /bin/bash cdcs_employee
-        echo "cdcs_employee:employee123" | chpasswd
-        echo "Employee 'cdcs_employee' created."
+    echo "--- PHASE 2: DEPENDENCY RESOLUTION ---"
+    # We run these BEFORE starting the service to prevent ENOENT/Module errors
+    if command -v npm &>/dev/null; then
+        echo "Installing Agent dependencies (Deril)..."
+        npm install --prefix "$VAULT_ROOT/deril" --silent
+        
+        echo "Installing Frontend dependencies (Evana)..."
+        # Checks for the client_frontend specifically if it exists
+        if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
+            npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
+        fi
+    else
+        echo "CRITICAL: npm not found! Install nodejs/npm first."
+        exit 1
     fi
-
-    echo "--- PHASE 2: SECURITY HARDENING ---"
-    apt-get update && apt-get install -y ufw fail2ban
-    ufw allow ssh
-    ufw --force enable
-    systemctl enable fail2ban && systemctl start fail2ban
 
     echo "--- PHASE 3: VAULT CONFIGURATION ---"
-    # Ensure all scripts in the vault are executable
     chmod +x "$VAULT_ROOT/juan"/*.sh
-    
-    # Install Node dependencies directly in the Vault
-    echo "Installing agent dependencies..."
-    npm install --prefix "$VAULT_ROOT/deril"
 
-    echo "--- PHASE 4: AUTO-BOOT FROM VAULT ---"
-    # The service now points to the /root/cdcs/deril folder
+    echo "--- PHASE 4: AUTO-BOOT PERSISTENCE ---"
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
-Description=CDCS Background Governance Agent (Vault Exec)
+Description=CDCS Background Governance Agent
 After=network.target
 
 [Service]
@@ -69,7 +61,6 @@ User=root
 WorkingDirectory=$VAULT_ROOT/deril
 ExecStart=$(which node) $VAULT_ROOT/deril/client.js
 Restart=always
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -79,12 +70,11 @@ EOF
     systemctl enable cdcs.service
     systemctl start cdcs.service
 
-    # Lockdown the Vault
+    # Strict Security Lockdown
     chown root:root -R "$VAULT_ROOT"
-    chmod 700 "$VAULT_ROOT" # Only root can even enter this folder
+    chmod 700 "$VAULT_ROOT"
     
     echo "--- [SUCCESS] SETUP COMPLETE ---"
-    echo "Admin: cdcs_admin | Employee: cdcs_employee"
 }
 
 reset_all() {
