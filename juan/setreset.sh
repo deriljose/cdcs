@@ -1,26 +1,26 @@
 #!/bin/bash
 
 # =================================================================
-# CDCS: Self-Deploying & Hardened Governance Module
-# Features: Self-Vaulting, Firewall, Fail2Ban, & Auto-Boot Service
+# CDCS: Vault-Centric Governance Module
+# Architecture: Root-Only Execution & Multi-User Provisioning
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
-   echo "CRITICAL ERROR: This script must be run with sudo (IT Admin)."
+   echo "CRITICAL ERROR: This script must be run with sudo."
    exit 1
 fi
 
-# SELF-MOVE LOGIC (Ensures files are in the /root Vault)
+# 1. THE VAULTING (Master Source in /root)
 VAULT_ROOT="/root/cdcs"
 VAULT_JUAN="$VAULT_ROOT/juan"
 CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [ "$CURRENT_DIR" != "$VAULT_JUAN" ]; then
-    echo "Staging CDCS project into the /root Vault..."
+    echo "[STAGING] Moving project into the protected /root Vault..."
     mkdir -p "$VAULT_ROOT"
     cp -r "$CURRENT_DIR/.."/* "$VAULT_ROOT/"
     chmod +x "$VAULT_JUAN/setreset.sh"
-    echo "Re-executing from protected space..."
+    echo "[STAGING] Vault secured. Re-executing..."
     exec "$VAULT_JUAN/setreset.sh" "$@"
 fi
 
@@ -28,38 +28,48 @@ cd "$(dirname "$0")"
 set -e
 
 setup_all() {
-    echo "--- PHASE 0: PRE-FLIGHT (Fresh System Check) ---"
-    if ! command -v node &> /dev/null; then
-        echo "Node.js not found. Installing runtime..."
-        apt-get update
-        apt-get install -y nodejs npm
+    echo "--- PHASE 1: USER PROVISIONING ---"
+    # Create Admin (with sudo) and Employee (standard user)
+    if ! id "cdcs_admin" &>/dev/null; then
+        useradd -m -s /bin/bash cdcs_admin
+        echo "cdcs_admin:admin123" | chpasswd
+        usermod -aG sudo cdcs_admin
+        echo "Admin 'cdcs_admin' created."
     fi
 
-    echo "--- PHASE 1: SECURITY HARDENING ---"
-    apt-get install -y ufw fail2ban
+    if ! id "cdcs_employee" &>/dev/null; then
+        useradd -m -s /bin/bash cdcs_employee
+        echo "cdcs_employee:employee123" | chpasswd
+        echo "Employee 'cdcs_employee' created."
+    fi
+
+    echo "--- PHASE 2: SECURITY HARDENING ---"
+    apt-get update && apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
-    systemctl enable fail2ban
-    systemctl start fail2ban
+    systemctl enable fail2ban && systemctl start fail2ban
 
-    echo "--- PHASE 2: VAULTING & PERSISTENCE ---"
-    # Moves the client to the internal protected drive
-    mkdir -p /opt/cdcs/deril
-    cp ../deril/client.js /opt/cdcs/deril/
-    cp ../deril/.env /opt/cdcs/deril/
-    cp ../deril/package.json /opt/cdcs/deril/
+    echo "--- PHASE 3: VAULT CONFIGURATION ---"
+    # Ensure all scripts in the vault are executable
+    chmod +x "$VAULT_ROOT/juan"/*.sh
+    
+    # Install Node dependencies directly in the Vault
+    echo "Installing agent dependencies..."
+    npm install --prefix "$VAULT_ROOT/deril"
 
-    # Register the background service to start at EVERY boot
+    echo "--- PHASE 4: AUTO-BOOT FROM VAULT ---"
+    # The service now points to the /root/cdcs/deril folder
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
-Description=CDCS Background Governance Agent
+Description=CDCS Background Governance Agent (Vault Exec)
 After=network.target
 
 [Service]
 User=root
-WorkingDirectory=/opt/cdcs/deril
-ExecStart=$(which node) /opt/cdcs/deril/client.js
+WorkingDirectory=$VAULT_ROOT/deril
+ExecStart=$(which node) $VAULT_ROOT/deril/client.js
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -68,18 +78,23 @@ EOF
     systemctl daemon-reload
     systemctl enable cdcs.service
     systemctl start cdcs.service
+
+    # Lockdown the Vault
+    chown root:root -R "$VAULT_ROOT"
+    chmod 700 "$VAULT_ROOT" # Only root can even enter this folder
     
-    echo "--- SETUP COMPLETE ---"
+    echo "--- [SUCCESS] SETUP COMPLETE ---"
+    echo "Admin: cdcs_admin | Employee: cdcs_employee"
 }
 
 reset_all() {
     echo "INITIATING SYSTEM SANITIZATION..."
-    # Standard reset logic stays here
-    apt-get purge -y vlc htop 2>/dev/null || true
-    if [ -f "/opt/cdcs/juan/delete_packages.sh" ]; then
-        /opt/cdcs/juan/delete_packages.sh
+    # Running the delete script from the Vault
+    if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
+        "$VAULT_JUAN/delete_packages.sh"
     fi
-    rm -rf ~/Documents/*
+    # Wipe employee data but leave admin data intact
+    rm -rf /home/cdcs_employee/Documents/*
     echo "RESET COMPLETE."
 }
 
