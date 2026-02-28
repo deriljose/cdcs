@@ -83,7 +83,7 @@ setup_all() {
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
-    echo "--- PHASE 3: DEPENDENCY RESOLUTION ---"
+    echo "--- PHASE 4: DEPENDENCY RESOLUTION ---"
     echo "Installing Agent dependencies (Deril)..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
     
@@ -92,7 +92,7 @@ setup_all() {
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
-    echo "--- PHASE 4: VAULT EXECUTION & PERSISTENCE ---"
+    echo "--- PHASE 5: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
