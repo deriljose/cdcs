@@ -26,6 +26,14 @@ sudo ufw deny out proto udp from any to any
 sudo ufw enable
 ```
 
+NVM needs to be installed for the latest Node.js version.
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+source ~/.bashrc
+nvm install node
+```
+
 Some packages nay not be available in the default repos, so these repos need to be added manually.
 
 **Google Chrome**
