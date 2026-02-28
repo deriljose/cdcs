@@ -126,35 +126,28 @@ EOF
 reset_all() {
     echo "--- INITIATING SYSTEM RESET TO GOLDEN BASELINE ---"
 
-    # 1. Package Sanitization
+    echo "[1/4] Purging unauthorized software..."
     if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
-        echo "[1/4] Purging unauthorized software..."
-        # We pass the whitelist to the delete script to ensure only non-approved items are removed
         bash "$VAULT_JUAN/delete_packages.sh"
     else
-        echo "[!] Warning: delete_packages.sh not found in Vault."
+        echo "[!] Warning: delete_packages.sh not found."
     fi
 
-    # 2. Identity Restoration
     echo "[2/4] Resetting employee credentials..."
-    # Resets the password back to the setup default
+    usermod -U cdcs_employee || true
     echo "cdcs_employee:employee123" | chpasswd
-    # Unlocks the account in case the Agent locked it (usermod -U)
-    usermod -U cdcs_employee || true 
 
-    # 3. Data Erasure (Employee Workspace Only)
     echo "[3/4] Wiping employee workspace..."
-    # Deletes everything in the employee home without deleting the user itself
+    # Kill active processes to avoid "File Busy" errors
+    pkill -u cdcs_employee || true
     find /home/cdcs_employee -mindepth 1 -delete
-    # Re-create the standard folders so the user doesn't log into a broken desktop
     mkdir -p /home/cdcs_employee/{Desktop,Documents,Downloads,Pictures,Public,Templates,Videos}
     chown -R cdcs_employee:cdcs_employee /home/cdcs_employee
 
-    # 4. Service Refresh
     echo "[4/4] Restarting Governance Agent..."
     systemctl restart cdcs.service
 
-    echo "* [SUCCESS] SYSTEM RESTORED TO BASELINE  *"
+    echo "* [SUCCESS] SYSTEM RESTORED TO BASELINE *"
 }
 
 case "$1" in
