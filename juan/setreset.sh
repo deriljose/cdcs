@@ -83,8 +83,7 @@ setup_all() {
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
-    echo "--- PHASE 4: DEPENDENCY RESOLUTION ---"
-    echo "__"
+    echo "--- PHASE 3: DEPENDENCY RESOLUTION ---"
     echo "Installing Agent dependencies (Deril)..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
     
@@ -93,7 +92,7 @@ setup_all() {
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
-    echo "--- PHASE 5: VAULT EXECUTION & PERSISTENCE ---"
+    echo "--- PHASE 4: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
@@ -125,14 +124,37 @@ EOF
 }
 
 reset_all() {
-    echo "INITIATING SYSTEM SANITIZATION..."
+    echo "--- INITIATING SYSTEM RESET TO GOLDEN BASELINE ---"
+
+    # 1. Package Sanitization
     if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
-        "$VAULT_JUAN/delete_packages.sh"
+        echo "[1/4] Purging unauthorized software..."
+        # We pass the whitelist to the delete script to ensure only non-approved items are removed
+        bash "$VAULT_JUAN/delete_packages.sh"
+    else
+        echo "[!] Warning: delete_packages.sh not found in Vault."
     fi
-    # Only wipes restricted employee folders
-    rm -rf /home/cdcs_employee/Documents/*
-    rm -rf /home/cdcs_employee/Downloads/*
-    echo "RESET COMPLETE."
+
+    # 2. Identity Restoration
+    echo "[2/4] Resetting employee credentials..."
+    # Resets the password back to the setup default
+    echo "cdcs_employee:employee123" | chpasswd
+    # Unlocks the account in case the Agent locked it (usermod -U)
+    usermod -U cdcs_employee || true 
+
+    # 3. Data Erasure (Employee Workspace Only)
+    echo "[3/4] Wiping employee workspace..."
+    # Deletes everything in the employee home without deleting the user itself
+    find /home/cdcs_employee -mindepth 1 -delete
+    # Re-create the standard folders so the user doesn't log into a broken desktop
+    mkdir -p /home/cdcs_employee/{Desktop,Documents,Downloads,Pictures,Public,Templates,Videos}
+    chown -R cdcs_employee:cdcs_employee /home/cdcs_employee
+
+    # 4. Service Refresh
+    echo "[4/4] Restarting Governance Agent..."
+    systemctl restart cdcs.service
+
+    echo "* [SUCCESS] SYSTEM RESTORED TO BASELINE  *"
 }
 
 case "$1" in
