@@ -87,3 +87,75 @@ cd evana/client_frontend/src
 npm install
 npm run dev
 ```
+---
+
+## Local Git + SSH Setup (Development)
+
+This section describes how a local Git server was configured using SSH so repositories can be cloned via IP address instead of GitHub.
+
+### 1. Install and Enable SSH
+
+```bash
+sudo apt update
+sudo apt install openssh-server
+sudo systemctl start ssh
+sudo systemctl enable ssh
+sudo systemctl status ssh
+```
+
+### 2. Find Server IP Address
+
+```bash
+ip a
+```
+
+Example:
+
+```
+192.168.222.128
+```
+
+### 3. Create Git Server User
+
+```bash
+sudo adduser git
+```
+
+### 4. Create Git Repository (Server Side)
+
+```bash
+su - git
+mkdir repos
+cd repos
+git init --bare sample.git
+exit
+```
+
+### 5. Test SSH Connection
+
+```bash
+ssh git@<SERVER_IP>
+```
+
+### 6. Clone Repository Using IP Address
+
+```bash
+git clone git@<SERVER_IP>:/home/git/repos/sample.git
+```
+
+### 7. Repository Access Control (Basic)
+
+Restrict access to owner:
+
+```bash
+sudo chmod 700 /home/git/repos/sample.git
+```
+
+Allow specific users via group:
+
+```bash
+sudo chgrp git /home/git/repos/sample.git
+sudo chmod 770 /home/git/repos/sample.git
+sudo usermod -aG git <username>
+```
+
