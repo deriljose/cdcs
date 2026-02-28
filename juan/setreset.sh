@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # =================================================================
-# CDCS: Identity-Aware Governance & Resilience Module
-# Architecture: Current-User Admin Elevation & Secure Provisioning
+# CDCS: Unified Governance & Resilience Module
+# Features: Self-Vaulting, Multi-User Provisioning, Auto-Dependencies
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
@@ -10,11 +10,7 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# DYNAMIC IDENTITY DETECTION
-# This identifies the actual human user behind the sudo command
-CURRENT_VM_USER=$(logname 2>/dev/null || echo $SUDO_USER)
-
-# 1. THE VAULTING
+# 1. THE VAULTING (Move project to protected /root space)
 VAULT_ROOT="/root/cdcs"
 VAULT_JUAN="$VAULT_ROOT/juan"
 CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,6 +20,7 @@ if [ "$CURRENT_DIR" != "$VAULT_JUAN" ]; then
     mkdir -p "$VAULT_ROOT"
     cp -r "$CURRENT_DIR/.."/* "$VAULT_ROOT/"
     chmod +x "$VAULT_JUAN/setreset.sh"
+    echo "[STAGING] Vault secured. Re-executing from protected space..."
     exec "$VAULT_JUAN/setreset.sh" "$@"
 fi
 
@@ -31,46 +28,45 @@ cd "$(dirname "$0")"
 set -e
 
 setup_all() {
-    echo "--- PHASE 0: PRE-FLIGHT (Tool Check) ---"
-    for tool in git node npm; do
-        if ! command -v $tool &>/dev/null; then
-            echo "$tool not found. Installing..."
-            apt-get update && apt-get install -y $tool
-        fi
-    done
-
-    echo "--- PHASE 1: ROLE PERMISSIONS & PROVISIONING ---"
-    # Elevate Current User to CDCS Admin
-    echo "Elevating '$CURRENT_VM_USER' to CDCS Admin..."
+    echo "--- PHASE 1: USER PROVISIONING ---"
+    # 1. Fix for Current User (Admin)
+    CURRENT_VM_USER=$(logname 2>/dev/null || echo $SUDO_USER)
     usermod -aG sudo "$CURRENT_VM_USER"
-    # Reset/Set password securely to avoid 'Invalid Password' errors
     echo "${CURRENT_VM_USER}:admin123" | chpasswd
-    
-    # Create Employee (Restricted)
+    echo "Admin '$CURRENT_VM_USER' updated (Pass: admin123)."
+
+    # 2. Fix for Employee
     if ! id "cdcs_employee" &>/dev/null; then
         useradd -m -s /bin/bash cdcs_employee
-        echo "cdcs_employee:employee123" | chpasswd
-        echo "Employee 'cdcs_employee' created (Pass: employee123)."
     fi
+    echo "cdcs_employee:employee123" | chpasswd
+    echo "Employee 'cdcs_employee' updated (Pass: employee123)."
 
     echo "--- PHASE 2: SECURITY HARDENING ---"
-    apt-get install -y ufw fail2ban
+    apt-get update && apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
     echo "--- PHASE 3: DEPENDENCY RESOLUTION ---"
-    echo "Installing Agent dependencies (Deril)..."
-    npm install --prefix "$VAULT_ROOT/deril" --silent
-    
-    if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
-        echo "Installing Frontend dependencies (Evana)..."
-        npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
+    # Ensure dependencies exist BEFORE the service starts
+    if command -v npm &>/dev/null; then
+        echo "Installing Agent dependencies in Vault..."
+        npm install --prefix "$VAULT_ROOT/deril" --silent
+        
+        if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
+            echo "Installing Frontend dependencies in Vault..."
+            npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
+        fi
+    else
+        echo "ERROR: npm not found. Install Node.js before running setup."
+        exit 1
     fi
 
     echo "--- PHASE 4: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
+    # Create the System Service pointing to the Vault
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
 Description=CDCS Background Governance Agent
@@ -91,23 +87,23 @@ EOF
     systemctl enable cdcs.service
     systemctl start cdcs.service
 
-    # Strict Lockdown
+    # Strict Lockdown: Only root can touch the Vault
     chown root:root -R "$VAULT_ROOT"
     chmod 700 "$VAULT_ROOT"
     
     echo "--- [SUCCESS] CDCS SETUP COMPLETE ---"
-    echo "Admin User: $CURRENT_VM_USER (Pass: admin123)"
-    echo "Employee User: cdcs_employee (Pass: employee123)"
 }
 
 reset_all() {
     echo "INITIATING SYSTEM SANITIZATION..."
-    # Reset targets the restricted employee, never the admin/current user
+    # Call the reset logic from the Vault
     if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
         "$VAULT_JUAN/delete_packages.sh"
     fi
+    # Wipe employee data but leave system/admin data
     rm -rf /home/cdcs_employee/Documents/*
-    echo "RESET COMPLETE."
+    rm -rf /home/cdcs_employee/Downloads/*
+    echo "RESET COMPLETE. SYSTEM RESTORED TO BASELINE."
 }
 
 case "$1" in
