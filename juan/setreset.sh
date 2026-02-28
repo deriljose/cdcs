@@ -1,14 +1,18 @@
 #!/bin/bash
 
 # =================================================================
-# CDCS: Unified Governance & Resilience Module
-# Features: Auto-Dependency, Multi-User, & Self-Healing
+# CDCS: Identity-Aware Governance & Resilience Module
+# Architecture: Current-User Admin Elevation & Secure Provisioning
 # =================================================================
 
 if [[ $EUID -ne 0 ]]; then
    echo "CRITICAL ERROR: This script must be run with sudo."
    exit 1
 fi
+
+# DYNAMIC IDENTITY DETECTION
+# This identifies the actual human user behind the sudo command
+CURRENT_VM_USER=$(logname 2>/dev/null || echo $SUDO_USER)
 
 # 1. THE VAULTING
 VAULT_ROOT="/root/cdcs"
@@ -28,32 +32,26 @@ set -e
 
 setup_all() {
     echo "--- PHASE 0: PRE-FLIGHT (Tool Check) ---"
-    # Check and Install Git
-    if ! command -v git &>/dev/null; then
-        echo "Git not found. Installing..."
-        apt-get update && apt-get install -y git
-    else
-        echo "Git is already installed. Skipping."
-    fi
-
-    # Check and Install Node/NPM
-    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
-        echo "Node.js/NPM not found. Installing latest stable..."
-        apt-get update
-        apt-get install -y nodejs npm
-    else
-        echo "Node.js and NPM are already installed. Skipping."
-    fi
-
-    echo "--- PHASE 1: USER PROVISIONING ---"
-    for user in cdcs_admin cdcs_employee; do
-        if ! id "$user" &>/dev/null; then
-            useradd -m -s /bin/bash "$user"
-            echo "$user:${user}123" | chpasswd
-            [[ "$user" == "cdcs_admin" ]] && usermod -aG sudo "$user"
-            echo "User '$user' created."
+    for tool in git node npm; do
+        if ! command -v $tool &>/dev/null; then
+            echo "$tool not found. Installing..."
+            apt-get update && apt-get install -y $tool
         fi
     done
+
+    echo "--- PHASE 1: ROLE PERMISSIONS & PROVISIONING ---"
+    # Elevate Current User to CDCS Admin
+    echo "Elevating '$CURRENT_VM_USER' to CDCS Admin..."
+    usermod -aG sudo "$CURRENT_VM_USER"
+    # Reset/Set password securely to avoid 'Invalid Password' errors
+    echo "${CURRENT_VM_USER}:admin123" | chpasswd
+    
+    # Create Employee (Restricted)
+    if ! id "cdcs_employee" &>/dev/null; then
+        useradd -m -s /bin/bash cdcs_employee
+        echo "cdcs_employee:employee123" | chpasswd
+        echo "Employee 'cdcs_employee' created (Pass: employee123)."
+    fi
 
     echo "--- PHASE 2: SECURITY HARDENING ---"
     apt-get install -y ufw fail2ban
@@ -98,15 +96,17 @@ EOF
     chmod 700 "$VAULT_ROOT"
     
     echo "--- [SUCCESS] CDCS SETUP COMPLETE ---"
+    echo "Admin User: $CURRENT_VM_USER (Pass: admin123)"
+    echo "Employee User: cdcs_employee (Pass: employee123)"
 }
 
 reset_all() {
     echo "INITIATING SYSTEM SANITIZATION..."
+    # Reset targets the restricted employee, never the admin/current user
     if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
         "$VAULT_JUAN/delete_packages.sh"
     fi
     rm -rf /home/cdcs_employee/Documents/*
-    rm -rf /home/cdcs_employee/Downloads/*
     echo "RESET COMPLETE."
 }
 
