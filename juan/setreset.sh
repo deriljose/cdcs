@@ -30,7 +30,21 @@ cd "$(dirname "$0")"
 set -e
 
 setup_all() {
-    echo "--- PHASE 0: PRE-FLIGHT (Tool Check) ---"
+    echo "--- PHASE 0: STATUS CHECK ---"
+    # Check if the service is already running and the vault exists
+    if systemctl is-active --quiet cdcs.service && [ -d "$VAULT_ROOT" ]; then
+        echo "******************************************"
+        echo "* [INFO] CDCS SETUP IS ALREADY COMPLETE  *"
+        echo "* System is currently under Governance.  *"
+        echo "******************************************"
+        # Optional: Ask if they want to force a refresh
+        read -p "Do you want to force a re-sync of dependencies? (y/N): " confirm
+        if [[ $confirm != [yY] ]]; then
+            echo "Exiting setup. No changes made."
+            exit 0
+        fi
+    fi
+    echo "--- PHASE 1: PRE-FLIGHT (Tool Check) ---"
     # Check and Install Git
     if ! command -v git &>/dev/null; then
         echo "Git not found. Installing..."
@@ -48,7 +62,7 @@ setup_all() {
         echo "Node.js and NPM are already installed. Skipping."
     fi
 
-    echo "--- PHASE 1: USER PROVISIONING ---"
+    echo "--- PHASE 2: USER PROVISIONING ---"
     # 1. ELEVATE CURRENT USER TO ADMIN (Total User 1)
     echo "Promoting '$REAL_USER' to CDCS Admin..."
     usermod -aG sudo "$REAL_USER"
@@ -63,7 +77,7 @@ setup_all() {
     echo "cdcs_employee:employee123" | chpasswd
     echo "Employee 'cdcs_employee' password set to: employee123"
 
-    echo "--- PHASE 2: SECURITY HARDENING ---"
+    echo "--- PHASE 3: SECURITY HARDENING ---"
     apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
