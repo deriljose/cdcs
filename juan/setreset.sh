@@ -84,6 +84,7 @@ setup_all() {
     systemctl enable fail2ban && systemctl start fail2ban
 
     echo "--- PHASE 4: DEPENDENCY RESOLUTION ---"
+    echo "__"
     echo "Installing Agent dependencies (Deril)..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
     
