@@ -32,13 +32,22 @@ set -e
 # Helper function to install NVM/Node for a specific user
 install_node_for_user() {
     local target_user=$1
+    local user_home=$(eval echo ~$target_user)
     echo "Installing NVM/Node for $target_user..."
-    sudo -u "$target_user" bash -c '
+    
+    sudo -u "$target_user" bash -c "
+        # 1. Run the installer
         curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-        export NVM_DIR="$HOME/.nvm"
-        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        
+        # 2. Force load NVM into this temporary shell session
+        export NVM_DIR=\"$user_home/.nvm\"
+        [ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"
+        
+        # 3. Install and Alias Node
         nvm install --lts
-    '
+        nvm use --lts
+        nvm alias default 'lts/*'
+    "
 }
 
 setup_all() {
@@ -148,7 +157,7 @@ EOF
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
     # Borrow the Node path from the employee's NVM for the Root Service
-    NODE_PATH=$(sudo -u cdcs_employee bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"; which node')
+    NODE_BIN=$(sudo -u cdcs_employee bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"; which node')
 
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
@@ -158,7 +167,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=$VAULT_ROOT/deril
-ExecStart=$(which node) $VAULT_ROOT/deril/client.js
+ExecStart=$NODE_BIN $VAULT_ROOT/deril/client.js
 Restart=always
 RestartSec=5
 
@@ -179,30 +188,26 @@ EOF
 }
 
 reset_all() {
-    echo "--- INITIATING SYSTEM RESET TO GOLDEN BASELINE ---"
+    echo "--- INITIATING SYSTEM RESET ---"
+    
+    echo "[1/4] Terminating 'cdcs' user processes..."
+    pkill -u cdcs || true
+    sleep 2
 
-    echo "[1/4] Purging unauthorized software..."
-    if [ -f "$VAULT_JUAN/delete_packages.sh" ]; then
-        bash "$VAULT_JUAN/delete_packages.sh"
-    else
-        echo "[!] Warning: delete_packages.sh not found."
-    fi
-
-    echo "[2/4] Resetting employee credentials..."
-    usermod -U cdcs_employee || true
-    echo "cdcs_employee:employee123" | chpasswd
-
-    echo "[3/4] Wiping employee workspace..."
-    # Kill active processes to avoid "File Busy" errors
-    pkill -u cdcs_employee || true
-    find /home/cdcs_employee -mindepth 1 -delete
-    mkdir -p /home/cdcs_employee/{Desktop,Documents,Downloads,Pictures,Public,Templates,Videos}
-    chown -R cdcs_employee:cdcs_employee /home/cdcs_employee
-
+    echo "[2/4] Sanitizing 'cdcs' workspace..."
+    # Deletes everything EXCEPT the .nvm folder to keep Node installed
+    find /home/cdcs -mindepth 1 -not -path '*/.nvm*' -delete
+    
+    # Rebuild skeleton
+    mkdir -p /home/cdcs/{Desktop,Documents,Downloads,Pictures}
+    chown -R cdcs:cdcs /home/cdcs
+    
+    echo "[3/4] Resetting 'cdcs' credentials..."
+    echo "cdcs:employee123" | chpasswd
+    
     echo "[4/4] Restarting Governance Agent..."
     systemctl restart cdcs.service
-
-    echo "* [SUCCESS] SYSTEM RESTORED TO BASELINE *"
+    echo "* RESET COMPLETE: GOLDEN BASELINE RESTORED *"
 }
 
 case "$1" in
@@ -210,3 +215,4 @@ case "$1" in
     reset) reset_all ;;
     *) echo "Usage: sudo ./setreset.sh {setup|reset}" ;;
 esac
+
