@@ -4,9 +4,9 @@ import {
   MessageSquare,
   Users,
   CheckSquare,
-  AlertTriangle,
   FileText,
-  Flag
+  Flag,
+  GitBranch
 } from "lucide-react";
 
 import "./Sidebar.css";
@@ -46,9 +46,9 @@ const Sidebar = () => {
           <span>Logs</span>
         </NavLink>
         
-        <NavLink to="/alerts" className={getNavLinkClass}>
-          <AlertTriangle />
-          <span>Alerts</span>
+        <NavLink to="/git" className={getNavLinkClass}>
+          <GitBranch />
+          <span>Git</span>
         </NavLink>
       </nav>
     </aside>

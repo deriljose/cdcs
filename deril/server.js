@@ -390,7 +390,105 @@ app.post('/api/tickets', requireApiKey, asyncHandler(async (req, res) => {
     return res.status(201).json({ message: 'Ticket recorded with prediction.', ticket });
 }));
 
+// --- Git collection endpoints ---
+// GET all git entries (public)
+app.get('/api/git', asyncHandler(async (req, res) => {
+  const docs = await db.collection('git').find({}).sort({ seq: 1 }).toArray();
+  res.json(docs);
+}));
 
+// POST add a new git entry { username, repo } (public)
+// Also append "username:repos/repo.git" to /home/git/permissions.txt
+app.post('/api/git', asyncHandler(async (req, res) => {
+  const { username, repo } = req.body || {};
+  if (!username || !repo) return res.status(400).json({ error: 'username and repo required' });
+
+  // Auto-increment sequence in a counters collection
+  const counter = await db.collection('counters').findOneAndUpdate(
+    { _id: 'git' },
+    { $inc: { seq: 1 } },
+    { upsert: true, returnDocument: 'after' }
+  );
+  const seq = (counter && counter.value && counter.value.seq) || 1;
+
+  const doc = { seq, username, repo };
+  const result = await db.collection('git').insertOne(doc);
+  doc._id = result.insertedId;
+
+  // Update permissions file (best-effort)
+  const permsPath = '/home/git/permissions.txt';
+  const line = `${username}:repos/${repo}.git`;
+  try {
+    const fsPromises = require('fs').promises;
+    let current = '';
+    try {
+      current = await fsPromises.readFile(permsPath, 'utf8');
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      current = '';
+    }
+    const lines = current.split(/\r?\n/).filter(Boolean);
+    if (!lines.includes(line)) {
+      const toAppend = (current && !current.endsWith('\n')) ? '\n' + line + '\n' : line + '\n';
+      await fsPromises.appendFile(permsPath, toAppend, 'utf8');
+      console.log(`Appended to permissions file: ${line}`);
+    } else {
+      console.log(`Permissions file already contains line: ${line}`);
+    }
+  } catch (fileErr) {
+    console.error('Failed to update permissions file:', fileErr);
+    // don't fail the request for file write errors
+  }
+
+  res.status(201).json(doc);
+}));
+
+// DELETE a git entry by ObjectId
+// Also remove matching "username:repos/repo.git" line from /home/git/permissions.txt
+app.delete('/api/git/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'Invalid id format' });
+  }
+
+  // find document to know username/repo for permissions file removal
+  const existing = await db.collection('git').findOne({ _id: new ObjectId(id) });
+  if (!existing) {
+    return res.status(404).json({ error: 'Git entry not found' });
+  }
+
+  const result = await db.collection('git').deleteOne({ _id: new ObjectId(id) });
+  if (result.deletedCount === 0) {
+    return res.status(404).json({ error: 'Git entry not found' });
+  }
+
+  // Update permissions file (best-effort)
+  const permsPath = '/home/git/permissions.txt';
+  const targetLine = `${existing.username}:repos/${existing.repo}.git`;
+  try {
+    const fsPromises = require('fs').promises;
+    let current = '';
+    try {
+      current = await fsPromises.readFile(permsPath, 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        current = '';
+      } else {
+        throw err;
+      }
+    }
+    const lines = current.split(/\r?\n/).filter(Boolean);
+    const filtered = lines.filter(l => l.trim() !== targetLine);
+    const newContent = filtered.length ? filtered.join('\n') + '\n' : '';
+    await fsPromises.writeFile(permsPath, newContent, 'utf8');
+    console.log(`Removed line from permissions file if present: ${targetLine}`);
+  } catch (fileErr) {
+    console.error('Failed to update permissions file after delete:', fileErr);
+    // do not fail the API call on file errors
+  }
+
+  res.status(204).send();
+}));
 
 // If any error occurs in an endpoint and isn't handled, it gets caught here. 
 app.use((err, req, res, next) => {

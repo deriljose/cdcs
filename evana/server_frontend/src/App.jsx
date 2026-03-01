@@ -5,7 +5,7 @@ import Sidebar from "./components/Sidebar";
 import SupportTickets from "./pages/SupportTickets";
 import Employees from "./pages/Employees";
 import Whitelist from "./pages/Whitelist";
-import Alerts from "./pages/Alerts";
+import Git from "./pages/Git";
 import Logs from "./pages/Logs";
 import Flagged from "./pages/Flagged";
 
@@ -77,7 +77,9 @@ const App = () => {
         <div className="main-content">
           <Routes>
             <Route path="/" element={<Employees role={role} />} />
-            <Route path="/alerts" element={<Alerts />} />
+            {/* serve Git UI at both paths so old links keep working */}
+            <Route path="/alerts" element={<Git />} />
+            <Route path="/git" element={<Git />} />
             <Route path="/support-tickets" element={<SupportTickets />} />
             <Route path="/whitelist" element={<Whitelist role={role} />} />
             <Route path="/flagged" element={<Flagged />} />

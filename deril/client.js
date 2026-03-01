@@ -385,10 +385,23 @@ const startAgent = () => {
         }
     });
 
+    // Return git entries from MongoDB to the local frontend (no auth)
+    app.get('/api/git', async (req, res) => {
+        try {
+            // Only return git entries belonging to the local user running the client agent
+            const docs = await db.collection('git').find({ username: ACTUAL_USER }).sort({ seq: 1 }).toArray();
+            return res.json(docs);
+        } catch (err) {
+            console.error('Agent: failed to fetch git entries from MongoDB:', err);
+            return res.status(500).json({ error: 'Failed to fetch git entries' });
+        }
+    });
+
+    // Removed the /api/whoami endpoint — no longer exposing local user to frontend.
+
     app.listen(AGENT_PORT, '0.0.0.0', () => { 
     console.log(`Agent listening on HTTP port ${AGENT_PORT}`);
 });
-
 };
 
 async function connectToDb() { // Defines a task to connect to the database.
