@@ -130,22 +130,37 @@ setup_all() {
     # CREATE DESKTOP LAUNCHER FOR EMPLOYEE
     # -----------------------------------------------------------------
     DESKTOP_DIR="/home/cdcs_employee/Desktop"
-    mkdir -p "$DESKTOP_DIR"
+mkdir -p "$DESKTOP_DIR"
 
-    tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
+tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=CDCS Client App
-Exec=bash -c 'export NVM_DIR="/root/.nvm"; [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"; cd $VAULT_ROOT/evana/client_frontend && nohup npm run dev > /dev/null 2>&1 & sleep 5; google-chrome http://localhost:5173'
+Exec=bash -c '
+export NVM_DIR="/root/.nvm"
+[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+
+cd $VAULT_ROOT/evana/client_frontend
+npm install --silent
+
+# Start frontend and log output
+nohup npm run dev > /root/cdcs/frontend.log 2>&1 &
+
+# Wait until port 5173 is open
+while ! ss -tulwn | grep -q 5173; do sleep 1; done
+
+# Open Chrome
+google-chrome http://localhost:5173
+'
 Icon=google-chrome
 Terminal=false
 Categories=Development;
 EOF
 
-    chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
-    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
-    sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
+chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
+chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
+sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
 
     # -----------------------------------------------------------------
     # CREATE/UPDATE SYSTEMD SERVICE (root)
