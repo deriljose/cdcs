@@ -70,15 +70,6 @@ setup_all() {
         systemctl enable --now mongod
     fi
 
-    # Check and Install Node/NPM
-    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
-        echo "Node.js/NPM not found. Installing latest stable..."
-        apt-get update
-        apt-get install -y nodejs npm
-    else
-        echo "Node.js and NPM are already installed. Skipping."
-    fi
-
     echo "--- PHASE 2: USER PROVISIONING ---"
     # 1. ELEVATE CURRENT USER TO ADMIN (Total User 1)
     echo "Promoting '$REAL_USER' to CDCS Admin..."
@@ -110,17 +101,49 @@ setup_all() {
         nvm install node
     '
     echo "--- PHASE 5: DEPENDENCY RESOLUTION ---"
-    echo "Installing Agent dependencies (Deril)..."
-    npm install --prefix "$VAULT_ROOT/deril" --silent
+    # Execute npm install as the employee to ensure compatibility with Node v25
+    sudo -u cdcs_employee bash -c "
+        export NVM_DIR=\"\$HOME/.nvm\"
+        [ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"
+        
+        echo \"Installing Agent dependencies (Deril)...\"
+        npm install --prefix $VAULT_ROOT/deril --silent
+        
+        if [ -d $VAULT_ROOT/evana/client_frontend ]; then
+            echo \"Installing Frontend dependencies (Evana)...\"
+            npm install --prefix $VAULT_ROOT/evana/client_frontend --silent
+        fi
+    "
+
+    echo "--- PHASE 5.5: CREATING DESKTOP APP LAUNCHER ---"
+    DESKTOP_DIR="/home/cdcs_employee/Desktop"
+    mkdir -p "$DESKTOP_DIR"
     
-    if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
-        echo "Installing Frontend dependencies (Evana)..."
-        npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
-    fi
+    # This creates the 'App' icon on the employee's desktop
+    # It starts the Vite server, waits 5 seconds, then opens Chrome to 5173
+    tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CDCS Client App
+Comment=Launch Frontend on Port 5173
+Exec=bash -c 'export NVM_DIR="\$HOME/.nvm"; [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"; cd $VAULT_ROOT/evana/client_frontend && (npm run dev &); sleep 5; google-chrome http://localhost:5173'
+Icon=google-chrome
+Terminal=true
+Categories=Development;
+EOF
+
+    chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
+    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
+    # Tell Ubuntu the launcher is trusted (removes the "security" warning)
+    sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
 
     echo "--- PHASE 6: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
+    # Borrow the Node path from the employee's NVM for the Root Service
+    NODE_PATH=$(sudo -u cdcs_employee bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"; which node')
+
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
 Description=CDCS Background Governance Agent
