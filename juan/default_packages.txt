@@ -660,3 +660,4 @@ zstd
 ncurses-term
 openssh-sftp-server
 ssh-import-id
+openssh-server
