@@ -24,6 +24,8 @@ const mongoClient = new MongoClient(mongoUri);
 // Agent configuration
 const AGENT_PORT = parseInt(process.env.CLIENT_AGENT_PORT || '4001', 10); 
 const AGENT_API_KEY = process.env.CLIENT_API_KEY;
+const NON_ROOT_USER = process.env.NON_ROOT_USER || 'cdcs_employee';
+const RESET_WATCH_INTERVAL_MS = 15 * 1000; // poll every 15s
 
 // --- Security State ---
 let lastServerContact = Date.now();
@@ -180,28 +182,79 @@ const performPackageCheck = async () => {
             lastServerContact = Date.now();
             try {
                 const res = JSON.parse(body);
-                if (res.command === 'LOCKDOWN') {
-                    console.log('Received LOCKDOWN command.');
+                const targetUser = NON_ROOT_USER;
+
+                const setEmployeeStatus = async (status) => {
                     try {
-                        // Set account password to the literal string "LOCKDOWN"
-                        execSync(`echo '${ACTUAL_USER}:LOCKDOWN' | chpasswd`);
-                        console.log(`Password for user '${ACTUAL_USER}' set to 'LOCKDOWN'`);
+                        // Persist status under the device's unique root username (ACTUAL_USER)
+                        await db.collection('employees').updateOne(
+                            { username: ACTUAL_USER },
+                            { $set: { status, timestamp: new Date().toISOString() } },
+                            { upsert: true }
+                        );
+                    } catch (dbErr) {
+                        console.error('Failed to update employees collection:', dbErr);
+                    }
+                };
+
+                const getLastPasswordChange = (user) => {
+                    try {
+                        const out = execSync(`chage -l ${user}`, { encoding: 'utf8' });
+                        const m = out.match(/^Last password change\\s*:\\s*(.+)$/m);
+                        return m ? m[1].trim() : null; // e.g., "Jun 10, 2024"
+                    } catch (err) {
+                        return null;
+                    }
+                };
+
+                const watchForPasswordChange = (user, baseline, onChanged) => {
+                    const iv = setInterval(() => {
+                        const cur = getLastPasswordChange(user);
+                        if (cur && baseline && cur !== baseline && cur.toLowerCase() !== 'never') {
+                            clearInterval(iv);
+                            onChanged().catch(e => console.error('watchForPasswordChange onChanged error:', e));
+                        }
+                    }, RESET_WATCH_INTERVAL_MS);
+                    return iv;
+                };
+
+                if (res.command === 'LOCKDOWN') {
+                    console.log('Received LOCKDOWN command for', targetUser);
+                    try {
+                        execSync(`echo '${targetUser}:LOCKDOWN' | chpasswd`);
+                        console.log(`Password for user '${targetUser}' set to 'LOCKDOWN'`);
                     } catch (e) {
                         console.error('Failed to set password to LOCKDOWN:', e.message);
                     }
 
                     try {
-                        // Kill all processes for the user to immediately kick them out
-                        execSync(`pkill -KILL -u ${ACTUAL_USER}`);
-                        console.log(`All processes for user '${ACTUAL_USER}' terminated.`);
+                        execSync(`pkill -KILL -u ${targetUser}`);
+                        console.log(`All processes for user '${targetUser}' terminated.`);
                     } catch (e) {
                         console.error('Failed to terminate user processes:', e.message);
                     }
+
+                    await setEmployeeStatus('LOCKED');
                 } else if (res.command === 'RESET_PASSWORD') {
-                    console.log('Received RESET_PASSWORD command.');
-                    try { execSync(`usermod -U ${ACTUAL_USER}`); } catch(e){}
-                    try { execSync(`chage -d 0 ${ACTUAL_USER}`); } catch(e){}
-                    await sendToServer('/api/reset-applied', 'POST', { username: ACTUAL_USER });
+                    console.log('Received RESET_PASSWORD command for', targetUser);
+                    try { execSync(`usermod -U ${targetUser}`); } catch(e){ console.error('usermod -U failed:', e.message); }
+                    try { execSync(`chage -d 0 ${targetUser}`); } catch(e){ console.error('chage -d 0 failed:', e.message); }
+
+                    // mark as waiting for reset locally
+                    await setEmployeeStatus('RESET_WAIT');
+
+                    // watch for the user actually changing their password before notifying server
+                    const baseline = getLastPasswordChange(targetUser);
+                    watchForPasswordChange(targetUser, baseline, async () => {
+                        console.log(`Detected password change for ${targetUser}. Marking ACTIVE.`);
+                        await setEmployeeStatus('ACTIVE');
+                        try {
+                            // Notify server using the device's unique root username
+                            await sendToServer('/api/reset-applied', 'POST', { username: ACTUAL_USER });
+                        } catch (notifyErr) {
+                            console.error('Failed to notify server of reset-applied:', notifyErr);
+                        }
+                    });
                 }
             } catch (e) { console.error('Error parsing response:', e); }
         }

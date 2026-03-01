@@ -47,3 +47,8 @@
   font-weight: 500;
   color: #111827; /* gray-900 */
 }
+
+/* Highlight rows inactive for >10 minutes with a subtle red tint */
+.inactive-row {
+  background-color: #fff5f5; /* very light red */
+}
