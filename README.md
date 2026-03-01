@@ -87,75 +87,71 @@ cd evana/client_frontend/src
 npm install
 npm run dev
 ```
----
 
-## Local Git + SSH Setup (Development)
+## Local Git + SSH Setup
 
 This section describes how a local Git server was configured using SSH so repositories can be cloned via IP address instead of GitHub.
 
-### 1. Install and Enable SSH
+### Enable SSH and initialize Git
+
+On the server,
 
 ```bash
 sudo apt update
-sudo apt install openssh-server
+sudo apt install openssh-server -u
 sudo systemctl start ssh
 sudo systemctl enable ssh
-sudo systemctl status ssh
 ```
 
-### 2. Find Server IP Address
+Find server IP Address.
 
 ```bash
 ip a
 ```
 
-Example:
+Initialize Git.
 
 ```
-192.168.222.128
-```
-
-### 3. Create Git Server User
-
-```bash
-sudo adduser git
-```
-
-### 4. Create Git Repository (Server Side)
-
-```bash
-su - git
+sudo adduser --disabled-password --gecos "" git
+sudo su - git
+mkdir .ssh
+chmod 700 .ssh
+touch .ssh/authorized_keys
+chmod 600 .ssh/authorized_keys
 mkdir repos
-cd repos
-git init --bare sample.git
-exit
 ```
 
-### 5. Test SSH Connection
+### Generate SSH key
+
+On the client,
 
 ```bash
-ssh git@<SERVER_IP>
+ssh-keygen -t ed25519 -f ~/.ssh/git_key -N ""
+cat ~/.ssh/git_key.pub
 ```
 
-### 6. Clone Repository Using IP Address
+Remember this key.
+
+### Gatekeeper script
+
+On the server, create `/home/git/check-access.sh` and `/home/git/permissions.txt`. Give execution permission with
 
 ```bash
-git clone git@<SERVER_IP>:/home/git/repos/sample.git
+sudo chmod +x /home/git/check-access.sh
 ```
 
-### 7. Repository Access Control (Basic)
+In the file `/home/git/.ssh/authorized_keys`, add
 
-Restrict access to owner:
+```
+command="/home/git/check-access.sh client_a",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty [PUBLIC_KEY]
+```
+
+where `[PUBLIC_KEY]` is the key from above.
+
+### Repo operations
+
+On the client, clone a repo with
 
 ```bash
-sudo chmod 700 /home/git/repos/sample.git
+GIT_SSH_COMMAND="ssh -i ~/.ssh/git_key" git clone git@[SERVER_IP]:repos/repo.git
 ```
-
-Allow specific users via group:
-
-```bash
-sudo chgrp git /home/git/repos/sample.git
-sudo chmod 770 /home/git/repos/sample.git
-sudo usermod -aG git <username>
-```
-
