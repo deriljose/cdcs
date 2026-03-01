@@ -657,3 +657,6 @@ zenity-common
 zip
 zlib1g
 zstd
+ncurses-term
+openssh-sftp-server
+ssh-import-id
