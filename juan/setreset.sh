@@ -53,6 +53,23 @@ setup_all() {
         echo "Git is already installed. Skipping."
     fi
 
+    # Chrome 
+    if ! command -v google-chrome &>/dev/null; then
+        echo "Installing Google Chrome..."
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg 
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list        
+        apt-get update && apt-get install -y google-chrome-stable
+    fi
+
+    # MONGODB 7.0 
+    if ! command -v mongod &>/dev/null; then
+        echo "Installing MongoDB 7.0..."
+        curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor 
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list        
+        apt-get update && apt-get install -y mongodb-org
+        systemctl enable --now mongod
+    fi
+
     # Check and Install Node/NPM
     if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
         echo "Node.js/NPM not found. Installing latest stable..."
@@ -83,7 +100,16 @@ setup_all() {
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
-    echo "--- PHASE 3: DEPENDENCY RESOLUTION ---"
+    echo "--- PHASE 4: EMPLOYEE NVM & NODE SETUP ---"
+    # --- EXACT COMMANDS FOR NVM (Executed as Employee) ---
+    sudo -u cdcs_employee bash -c '
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        source ~/.bashrc
+        nvm install node
+    '
+    echo "--- PHASE 5: DEPENDENCY RESOLUTION ---"
     echo "Installing Agent dependencies (Deril)..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
     
@@ -92,7 +118,7 @@ setup_all() {
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
-    echo "--- PHASE 4: VAULT EXECUTION & PERSISTENCE ---"
+    echo "--- PHASE 6: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
