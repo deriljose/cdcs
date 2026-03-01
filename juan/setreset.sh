@@ -13,7 +13,9 @@ fi
 # DYNAMIC IDENTITY DETECTION
 REAL_USER=$(logname 2>/dev/null || echo $SUDO_USER)
 
-# 1. THE VAULTING
+# =================================================================
+# VAULT SETUP
+# =================================================================
 VAULT_ROOT="/root/cdcs"
 VAULT_JUAN="$VAULT_ROOT/juan"
 CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -29,12 +31,12 @@ fi
 cd "$(dirname "$0")"
 set -e
 
-# -----------------------------------------------------------------
-#  FUNCTION: Install Node/NVM as root
-# -----------------------------------------------------------------
+# =================================================================
+# INSTALL NODE / NVM AS ROOT
+# =================================================================
 install_node_for_root() {
     ROOT_HOME="/root"
-    echo "--- PHASE 4: INSTALL NVM/Node FOR ROOT ---"
+    echo "--- INSTALLING NVM/Node FOR ROOT ---"
 
     export NVM_DIR="$ROOT_HOME/.nvm"
     if [ ! -s "$NVM_DIR/nvm.sh" ]; then
@@ -42,7 +44,6 @@ install_node_for_root() {
         curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
     fi
 
-    # Load NVM and install Node
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
     nvm install --lts
     nvm use --lts
@@ -52,9 +53,9 @@ install_node_for_root() {
     echo "Node version: $(node --version)"
 }
 
-# -----------------------------------------------------------------
-#  SETUP FUNCTION
-# -----------------------------------------------------------------
+# =================================================================
+# SETUP FUNCTION
+# =================================================================
 setup_all() {
     echo "--- PHASE 0: STATUS CHECK ---"
     if systemctl is-active --quiet cdcs.service && [ -d "$VAULT_ROOT" ]; then
@@ -68,20 +69,20 @@ setup_all() {
         fi
     fi
 
-    echo "--- PHASE 1: PRE-FLIGHT (Tool Check) ---"
-    # Git
+    # -----------------------------------------------------------------
+    # PHASE 1: PRE-FLIGHT TOOLS
+    # -----------------------------------------------------------------
+    echo "--- CHECKING REQUIRED TOOLS ---"
     if ! command -v git &>/dev/null; then
         apt-get update && apt-get install -y git
     fi
 
-    # Chrome
     if ! command -v google-chrome &>/dev/null; then
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg
         echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
         apt-get update && apt-get install -y google-chrome-stable
     fi
 
-    # MongoDB 7.0
     if ! command -v mongod &>/dev/null; then
         curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
         echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-7.0.list
@@ -89,7 +90,9 @@ setup_all() {
         systemctl enable --now mongod
     fi
 
-    echo "--- PHASE 2: USER PROVISIONING ---"
+    # -----------------------------------------------------------------
+    # PHASE 2: USER PROVISIONING
+    # -----------------------------------------------------------------
     echo "Promoting '$REAL_USER' to CDCS Admin..."
     usermod -aG sudo "$REAL_USER"
     echo "${REAL_USER}:admin123" | chpasswd
@@ -101,80 +104,72 @@ setup_all() {
     fi
     echo "cdcs_employee:employee123" | chpasswd
 
-    echo "--- PHASE 3: SECURITY HARDENING ---"
+    # -----------------------------------------------------------------
+    # PHASE 3: SECURITY HARDENING
+    # -----------------------------------------------------------------
     apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
     # -----------------------------------------------------------------
-    # Node/NVM for root
+    # PHASE 4: INSTALL NODE/NVM
     # -----------------------------------------------------------------
     install_node_for_root
 
-    # -----------------------------------------------------------------
-    # DEPENDENCY RESOLUTION (root)
-    # -----------------------------------------------------------------
     export NVM_DIR="/root/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-    echo "--- PHASE 5: INSTALLING DERIL DEPENDENCIES ---"
+    # -----------------------------------------------------------------
+    # PHASE 5: DEPENDENCY INSTALL
+    # -----------------------------------------------------------------
+    echo "--- INSTALLING DERIL DEPENDENCIES ---"
     npm install --prefix "$VAULT_ROOT/deril" --silent
 
     if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
-        echo "--- PHASE 5: INSTALLING EVANA FRONTEND ---"
+        echo "--- INSTALLING EVANA FRONTEND ---"
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
     # -----------------------------------------------------------------
-    # CREATE DESKTOP LAUNCHER FOR EMPLOYEE
+    # PHASE 6: CREATE RUNNER SCRIPT (FRONTEND + BACKEND)
     # -----------------------------------------------------------------
-    DESKTOP_DIR="/home/cdcs_employee/Desktop"
-mkdir -p "$DESKTOP_DIR"
+    RUNNER_SCRIPT="$VAULT_ROOT/run_cdcs.sh"
 
-tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=CDCS Client App
-Exec=bash -c '
+    tee "$RUNNER_SCRIPT" > /dev/null <<'EOF'
+#!/bin/bash
 export NVM_DIR="/root/.nvm"
-[ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-cd $VAULT_ROOT/evana/client_frontend
+VAULT_ROOT="/root/cdcs"
+
+# Start frontend in background
+cd "$VAULT_ROOT/evana/client_frontend"
 npm install --silent
+nohup npm run dev > "$VAULT_ROOT/frontend.log" 2>&1 &
 
-# Start frontend and log output
-nohup npm run dev > /root/cdcs/frontend.log 2>&1 &
-
-# Wait until port 5173 is open
+# Wait for port 5173
 while ! ss -tulwn | grep -q 5173; do sleep 1; done
 
-# Open Chrome
-google-chrome http://localhost:5173
-'
-Icon=google-chrome
-Terminal=false
-Categories=Development;
+# Start backend
+cd "$VAULT_ROOT/deril"
+exec node client.js
 EOF
 
-chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
-chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
-sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
+    chmod +x "$RUNNER_SCRIPT"
 
     # -----------------------------------------------------------------
-    # CREATE/UPDATE SYSTEMD SERVICE (root)
+    # PHASE 7: CREATE/UPDATE SYSTEMD SERVICE
     # -----------------------------------------------------------------
-    NODE_BIN=$(which node)
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
-Description=CDCS Background Governance Agent
+Description=CDCS Unified Governance Agent
 After=network.target
 
 [Service]
 User=root
-WorkingDirectory=$VAULT_ROOT/deril
-ExecStart=$NODE_BIN $VAULT_ROOT/deril/client.js
+WorkingDirectory=$VAULT_ROOT
+ExecStart=$RUNNER_SCRIPT
 Restart=always
 RestartSec=5
 
@@ -187,7 +182,28 @@ EOF
     systemctl restart cdcs.service
 
     # -----------------------------------------------------------------
-    # LOCKDOWN VAULT
+    # PHASE 8: CREATE DESKTOP LAUNCHER
+    # -----------------------------------------------------------------
+    DESKTOP_DIR="/home/cdcs_employee/Desktop"
+    mkdir -p "$DESKTOP_DIR"
+
+    tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CDCS Client App
+Exec=google-chrome http://localhost:5173
+Icon=google-chrome
+Terminal=false
+Categories=Development;
+EOF
+
+    chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
+    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
+    sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
+
+    # -----------------------------------------------------------------
+    # PHASE 9: LOCKDOWN VAULT
     # -----------------------------------------------------------------
     chown root:root -R "$VAULT_ROOT"
     chmod 700 "$VAULT_ROOT"
@@ -196,9 +212,9 @@ EOF
     echo "Total Users Managed: 2 ($REAL_USER & cdcs_employee)"
 }
 
-# -----------------------------------------------------------------
+# =================================================================
 # RESET FUNCTION
-# -----------------------------------------------------------------
+# =================================================================
 reset_all() {
     echo "--- INITIATING SYSTEM RESET ---"
 
@@ -219,9 +235,9 @@ reset_all() {
     echo "* RESET COMPLETE: GOLDEN BASELINE RESTORED *"
 }
 
-# -----------------------------------------------------------------
+# =================================================================
 # SCRIPT ENTRY
-# -----------------------------------------------------------------
+# =================================================================
 case "$1" in
     setup) setup_all ;;
     reset) reset_all ;;
