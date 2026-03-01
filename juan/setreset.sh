@@ -29,6 +29,18 @@ fi
 cd "$(dirname "$0")"
 set -e
 
+# Helper function to install NVM/Node for a specific user
+install_node_for_user() {
+    local target_user=$1
+    echo "Installing NVM/Node for $target_user..."
+    sudo -u "$target_user" bash -c '
+        curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+        export NVM_DIR="$HOME/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        nvm install --lts
+    '
+}
+
 setup_all() {
     echo "--- PHASE 0: STATUS CHECK ---"
     # Check if the service is already running and the vault exists
@@ -53,13 +65,21 @@ setup_all() {
         echo "Git is already installed. Skipping."
     fi
 
-    # Check and Install Node/NPM
-    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
-        echo "Node.js/NPM not found. Installing latest stable..."
-        apt-get update
-        apt-get install -y nodejs npm
-    else
-        echo "Node.js and NPM are already installed. Skipping."
+    # Chrome 
+    if ! command -v google-chrome &>/dev/null; then
+        echo "Installing Google Chrome..."
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg 
+        echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list        
+        apt-get update && apt-get install -y google-chrome-stable
+    fi
+
+    # MONGODB 7.0 
+    if ! command -v mongod &>/dev/null; then
+        echo "Installing MongoDB 7.0..."
+        curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor 
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list        
+        apt-get update && apt-get install -y mongodb-org
+        systemctl enable --now mongod
     fi
 
     echo "--- PHASE 2: USER PROVISIONING ---"
@@ -83,18 +103,53 @@ setup_all() {
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
-    echo "--- PHASE 3: DEPENDENCY RESOLUTION ---"
-    echo "Installing Agent dependencies (Deril)..."
-    npm install --prefix "$VAULT_ROOT/deril" --silent
-    
-    if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
-        echo "Installing Frontend dependencies (Evana)..."
-        npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
-    fi
+    echo "--- PHASE 4: NVM ISOLATION ---"
+    install_node_for_user "$REAL_USER"
+    install_node_for_user "cdcs_employee"
 
-    echo "--- PHASE 4: VAULT EXECUTION & PERSISTENCE ---"
+    echo "--- PHASE 5: DEPENDENCY RESOLUTION ---"
+    # Execute npm install as the employee to ensure compatibility with Node v25
+    sudo -u cdcs_employee bash -c "
+        export NVM_DIR=\"\$HOME/.nvm\"
+        [ -s \"\$NVM_DIR/nvm.sh\" ] && \. \"\$NVM_DIR/nvm.sh\"
+        
+        echo \"Installing Agent dependencies (Deril)...\"
+        npm install --prefix $VAULT_ROOT/deril --silent
+        
+        if [ -d $VAULT_ROOT/evana/client_frontend ]; then
+            echo \"Installing Frontend dependencies (Evana)...\"
+            npm install --prefix $VAULT_ROOT/evana/client_frontend --silent
+        fi
+    "
+
+    echo "--- PHASE 5.5: CREATING DESKTOP APP LAUNCHER ---"
+    DESKTOP_DIR="/home/cdcs_employee/Desktop"
+    mkdir -p "$DESKTOP_DIR"
+    
+    # This creates the 'App' icon on the employee's desktop
+    # It starts the Vite server, waits 5 seconds, then opens Chrome to 5173
+    tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CDCS Client App
+Exec=bash -c 'export NVM_DIR="\$HOME/.nvm"; [ -s "\$NVM_DIR/nvm.sh" ] && \. "\$NVM_DIR/nvm.sh"; cd $VAULT_ROOT/evana/client_frontend && nohup npm run dev > /dev/null 2>&1 & sleep 5; google-chrome http://localhost:5173'
+Icon=google-chrome
+Terminal=false
+Categories=Development;
+EOF
+
+    chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
+    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
+    # Tell Ubuntu the launcher is trusted (removes the "security" warning)
+    sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
+
+    echo "--- PHASE 6: VAULT EXECUTION & PERSISTENCE ---"
     chmod +x "$VAULT_ROOT/juan"/*.sh
     
+    # Borrow the Node path from the employee's NVM for the Root Service
+    NODE_PATH=$(sudo -u cdcs_employee bash -c 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"; which node')
+
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
 Description=CDCS Background Governance Agent
@@ -155,4 +210,3 @@ case "$1" in
     reset) reset_all ;;
     *) echo "Usage: sudo ./setreset.sh {setup|reset}" ;;
 esac
-
