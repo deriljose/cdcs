@@ -1,27 +1,30 @@
+// Server backend
+
+// Configure variables below
+const INACTIVITY_LIMIT_MINUTES = 30;
+
 const express = require('express'); 
 const https = require('https'); 
 const http = require('http'); 
 const fs = require('fs'); 
-const cors = require('cors'); // A tool to allow web pages from different addresses to talk to this server.
+const cors = require('cors'); // A tool to allow web pages from different addresses to talk to this server
 const os = require('os'); 
 const { MongoClient, ObjectId } = require('mongodb'); 
 require('dotenv').config();
 
-// --- Main Application Setup ---
-// Creates the main web server application.
 const app = express();
-const INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 5 Minutes
-// Tells the server to automatically understand incoming data that is in JSON format.
+const INACTIVITY_LIMIT_MS = INACTIVITY_LIMIT_MINUTES * 60 * 1000;
+
+// Tells the server to automatically understand incoming data that is in JSON format
 app.use(express.json());
-// Applies the CORS rules, allowing the frontend website to make requests to this server.
+// Applies the CORS rules, allowing the frontend website to make requests to this server
 app.use(cors());
-// Makes the JSON output from the server nicely formatted and easy to read for humans.
+// Makes the JSON output from the server nicely formatted and easy to read for humans
 app.set('json spaces', 2);
 
-// --- Database Configuration ---
 const mongoUri = process.env.MONGO_URI;
 if (!mongoUri) {
-    console.error('Error: MONGO_URI is not defined in the .env file.');
+    console.error('ERROR: MONGO_URI is not defined in .env');
     process.exit(1);
 }
 const dbName = 'cdcs';
@@ -29,82 +32,76 @@ const dbName = 'cdcs';
 const client = new MongoClient(mongoUri);
 let db;
 
-// --- Child Process Setup ---
-// Imports a tool to run other programs (like Python scripts) from our server.
+// Imports a tool to run other programs (like Python scripts) from our server
 const { spawn } = require('child_process');
 const path = require('path');
-
 
 async function connectToDatabase() {
     try {
         await client.connect();
         db = client.db(dbName);
-        console.log('Successfully connected to MongoDB Atlas!');
+        console.log('Successfully connected to MongoDB');
     } catch (e) {
-        console.error('Failed to connect to MongoDB', e);
+        console.error('Failed to connect to MongoDB:', e);
         process.exit(1);
     }
 }
 
-// --- Helper Functions ---
-// It helps catch any errors that happen in asynchronous functions and passes them to our main error handler, preventing the server from crashing.
+// Helper functions to catch any errors that happen in asynchronous functions and passes them to our main error handler, preventing the server from crashing
 const asyncHandler = (fn) => (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// --- In-Memory Command Queue ---
+// In-memory command queue
 let commandQueue = [];
 
-// --- Authentication Middleware ---
+// Authentication middleware
 const apiKeys = process.env.API_KEYS || '';
-// Creates a fast-lookup set of the valid API keys.
+// Creates a fast-lookup set of the valid API keys
 const VALID_API_KEYS = new Set(apiKeys.split(',').filter(Boolean));
 if (VALID_API_KEYS.size === 0) {
-    console.warn('Warning: No API_KEYS found in .env file. API endpoints will be inaccessible.');
+    console.warn('ALERT: No API_KEYS found in .env, API endpoints will be inaccessible');
 }
-// A security checkpoint (middleware) that checks for a valid API key.
+// A security checkpoint (middleware) that checks for a valid API key
 const requireApiKey = (req, res, next) => {
     const apiKey = req.get('X-API-Key');
     console.log(`[API Key Check] Path: "${req.path}", Method: ${req.method}, Key Provided: ${apiKey ? 'Yes' : 'No'}`);
     if (apiKey && VALID_API_KEYS.has(apiKey)) {
         return next();
     }
-    console.error(`[API Key Check] Unauthorized access attempt on "${req.path}". This endpoint requires a valid X-API-Key header.`);
-    res.status(401).json({ error: 'Unauthorized', detail: 'A valid X-API-Key header is required for this endpoint.' });
+    console.error(`Unauthorized access attempt on "${req.path}", this endpoint requires a valid X-API-Key header`);
+    res.status(401).json({ error: 'Unauthorized', detail: 'A valid X-API-Key header is required for this endpoint' });
 };
 
-// --- Route Definitions ---
-// An endpoint for queuing a package installation.
+// Route definitions
+// An endpoint for queuing a package installation
 app.post('/api/install-package', requireApiKey, asyncHandler(async (req, res) => {
     const { packageName } = req.body;
     if (!packageName) {
         return res.status(400).json({ error: 'packageName is required.' });
     }
-    console.log(`Received install request for package: ${packageName}. Queuing command.`);
+    console.log(`Received install request for package: ${packageName}, queuing command...`);
     commandQueue.push({ msg_type: 2001, packageName: packageName });
-    res.status(202).json({ message: 'Install command queued successfully.' });
+    res.status(202).json({ message: 'Install command queued successfully' });
 }));
 
-/**
- * The client agent periodically sends a message here. If there's a command
- * in the queue for it, the server sends it back as a response.
- */
-// An endpoint to check-in from the client.
+// An endpoint to check-in from the client
+// Used for heartbeat
 app.post('/api/check-in', asyncHandler(async (req, res) => {
     const { username, mac_address, unauthorized_count = 0 } = req.body;
 
-    // --- Security Status Sync ---
     const userCollection = db.collection('employees');
     const user = await userCollection.findOne({ username: username });
     
-    // 1. If Client reports it is LOCKED, ensure DB reflects that
+    // Check if client reports status as LOCKED
     if (req.body.clientStatus === 'LOCKED') {
         if (user && user.status !== 'LOCKED' && user.status !== 'RESET_WAIT') {
+            // update DB with status
             await userCollection.updateOne({ username }, { $set: { status: 'LOCKED' } });
         }
     }
 
-    // 2. Check DB status to send commands back to Client
+    // Check client status otherwise, and issue corresponding commands
     if (user) {
         if (user.status === 'LOCKED') return res.json({ command: 'LOCKDOWN' });
         if (user.status === 'RESET_WAIT') return res.json({ command: 'RESET_PASSWORD' });
@@ -112,8 +109,7 @@ app.post('/api/check-in', asyncHandler(async (req, res) => {
         await userCollection.updateOne({ username }, { $set: { timestamp: new Date().toISOString(), status: 'ACTIVE' } });
     }
 
-    // Insert the heartbeat payload into the appropriate collection.
-    // Use try/catch so DB errors don't cause endpoint to return 500.
+    // Insert the heartbeat payload into the appropriate collection
     try {
         const count = Number(unauthorized_count) || 0;
         if (count === 0) {
@@ -122,8 +118,7 @@ app.post('/api/check-in', asyncHandler(async (req, res) => {
             await db.collection('flagged').insertOne(req.body);
         }
     } catch (e) {
-        console.error('Failed to insert heartbeat into logs:', e);
-        // continue — do not fail the request because of logging errors
+        console.error('Failed to insert log:', e);
     }
 
     // Check if there is any pending command to send
@@ -139,14 +134,13 @@ app.post('/api/check-in', asyncHandler(async (req, res) => {
         };
         await db.collection('installation_logs').insertOne(logDoc).catch(e => console.error('Failed to insert log:', e));
         
-        // Send command to client
         res.json(command);
     } else {
-        res.json({ reply: 'OK. No pending commands.' });
+        res.json({ reply: 'No pending commands' });
     }
 }));
 
-// An endpoint for clients to report unauthorized packages.
+// An endpoint for clients to report unauthorized packages
 app.post('/message', asyncHandler(async (req, res) => {
     if (req.body.msg_type === 1001) {
         const { msg_type, ...doc } = req.body;
@@ -154,12 +148,12 @@ app.post('/message', asyncHandler(async (req, res) => {
         await flaggedCollectionRef.insertOne(doc);
         console.log('Flagged data inserted into MongoDB:', doc);
 
-        // Also store the full incoming JSON into package_logs collection (safe)
+        // Also store the full incoming JSON into package_logs collection
         try {
             await db.collection('package_logs').insertOne(req.body);
-            console.log('Inserted report into package_logs collection.');
+            console.log('Inserted report into package_logs');
         } catch (e) {
-            console.error('Failed to insert into package_logs:', e);
+            console.error('Failed to insert log:', e);
         }
 
         if (commandQueue.length > 0) {
@@ -175,10 +169,10 @@ app.post('/message', asyncHandler(async (req, res) => {
             await db.collection('installation_logs').insertOne(logDoc);
             res.json(command);
         } else {
-            res.json({ reply: 'Message received and logged. No pending commands.' });
+            res.json({ reply: 'Message received and logged, no pending commands' });
         }
     } else {
-        res.status(400).json({ error: 'Invalid msg_type provided.' });
+        res.status(400).json({ error: 'Invalid msg_type provided' });
     }
 }));
 
@@ -195,24 +189,22 @@ createReadOnlyEndpoint('/flagged', 'flagged');
 createReadOnlyEndpoint('/employees', 'employees');
 createReadOnlyEndpoint('/packages', 'packages');
 
-// --- Public, Key-less Endpoints for Frontend Dashboard ---
-
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     if (username === 'admin' && password === 'admin') {
         return res.json({ token: 'admin-session-token', role: 'admin' });
     }
-    if (username === 'it_user' && password === 'password') {
+    if (username === 'it_user' && password === 'it_user') {
         return res.json({ token: 'it-session-token', role: 'it_employee' });
     }
     res.status(401).json({ error: 'Invalid credentials' });
 });
 
 /**
- * These endpoints do NOT require an API key, so the web dashboard can access them easily.
- * @param {string} path - The API path for the endpoint (e.g., '/api/employees').
- * @param {string} collectionName - The name of the MongoDB collection that *should* be queried.
- * @param {object} [sort={}] - An optional setting to sort the results.
+ * These endpoints do NOT require an API key, so the web dashboard can access them easily
+ * @param {string} path - The API path for the endpoint (e.g., '/api/employees')
+ * @param {string} collectionName - The name of the MongoDB collection that *should* be queried
+ * @param {object} [sort={}] - An optional setting to sort the results
  */
 const createPublicReadOnlyEndpoint = (path, collectionName, sort = {}) => {
     app.get(path, asyncHandler(async (req, res) => {
@@ -229,7 +221,7 @@ createPublicReadOnlyEndpoint('/api/tickets', 'tickets', { timestamp: -1 });
 createPublicReadOnlyEndpoint('/api/flagged', 'flagged');
 createPublicReadOnlyEndpoint('/api/logs', 'logs');
 
-// --- Admin Security Endpoints ---
+// Admin security endpoints
 app.post('/api/admin/lockdown', asyncHandler(async (req, res) => {
     const { username } = req.body;
     await db.collection('employees').updateOne({ username }, { $set: { status: 'LOCKED' } });
@@ -248,11 +240,11 @@ app.post('/api/reset-applied', asyncHandler(async (req, res) => {
     res.json({ success: true });
 }));
 
-// An endpoint for the frontend dashboard to add a new package to the approved list.
+// An endpoint for the frontend dashboard to add a new package to the approved list
 app.post('/api/packages', asyncHandler(async (req, res) => {
     const { name } = req.body;
     if (!name || typeof name !== 'string' || name.trim() === '') {
-        return res.status(400).json({ error: 'A non-empty package name is required.' });
+        return res.status(400).json({ error: 'A non-empty package name is required' });
     }
 
     const collection = db.collection('packages');
@@ -260,7 +252,7 @@ app.post('/api/packages', asyncHandler(async (req, res) => {
 
     const existingPackage = await collection.findOne({ name: trimmedName });
     if (existingPackage) {
-        return res.status(409).json({ error: 'Package already exists in the whitelist.' });
+        return res.status(409).json({ error: 'Package already exists in the whitelist' });
     }
 
     const result = await collection.insertOne({ name: trimmedName });
@@ -270,40 +262,39 @@ app.post('/api/packages', asyncHandler(async (req, res) => {
 }));
 
 
-// An endpoint for the frontend dashboard to delete a package from the approved list.
+// An endpoint for the frontend dashboard to delete a package from the approved list
 app.delete('/api/packages/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ error: 'Invalid package ID format.' });
+        return res.status(400).json({ error: 'Invalid package ID format' });
     }
     const collection = db.collection('packages');
     const result = await collection.deleteOne({ _id: new ObjectId(id) });
     if (result.deletedCount === 0) {
-        return res.status(404).json({ error: 'Package not found.' });
+        return res.status(404).json({ error: 'Package not found' });
     }
     res.status(204).send();
 }));
 
 
-// An endpoint for the frontend dashboard to delete a support ticket.
+// An endpoint for the frontend dashboard to delete a support ticket
 app.delete('/api/tickets/:id', asyncHandler(async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ error: 'Invalid ticket ID format.' });
+        return res.status(400).json({ error: 'Invalid ticket ID format' });
     }
     const collection = db.collection('tickets');
     const result = await collection.deleteOne({ _id: new ObjectId(id) });
     if (result.deletedCount === 0) {
-        return res.status(404).json({ error: 'Ticket not found.' });
+        return res.status(404).json({ error: 'Ticket not found' });
     }
-    // On successful deletion, send 204 No Content
     res.status(204).send();
 }));
 
 app.patch('/api/tickets/:id/resolve', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
-        return res.status(400).json({ error: 'Invalid ticket ID format.' });
+        return res.status(400).json({ error: 'Invalid ticket ID format' });
     }
     const collection = db.collection('tickets');
     const result = await collection.updateOne(
@@ -311,14 +302,13 @@ app.patch('/api/tickets/:id/resolve', async (req, res) => {
         { $set: { resolved: true } } // Set the resolved field to true
     );
     if (result.modifiedCount === 0) {
-        return res.status(500).json({ error: 'Failed to update ticket status.' });
+        return res.status(500).json({ error: 'Failed to update ticket status' });
     }
     const updatedTicket = await collection.findOne({ _id: new ObjectId(id) });
-    // On successful deletion, send 200 OK
     res.status(200).json(updatedTicket);
 });
 
-// An endpoint for client agents to log the result of a package installation.
+// An endpoint for client agents to log the result of a package installation
 app.post('/api/log-install', requireApiKey, asyncHandler(async (req, res) => {
     const log = req.body || {};
     if (!log.timestamp) {
@@ -326,16 +316,16 @@ app.post('/api/log-install', requireApiKey, asyncHandler(async (req, res) => {
     }
     await db.collection('installation_logs').insertOne(log);
     console.log('Received installation log from client:', log);
-    return res.status(201).json({ message: 'Installation log recorded.' });
+    return res.status(201).json({ message: 'Installation log recorded' });
 }));
 
-// Defines the path to the Python script used for predicting ticket properties.
+// Defines the path to the Python script used for predicting ticket properties
 const pythonScript = path.join(__dirname, '../suhail/predict_ticket.py');
 
 /**
- * It sends the description to the script and gets back a predicted category and priority.
- * @param {string} description The ticket description text.
- * @returns {Promise<object>} A promise that resolves with the prediction (e.g., { category: 'Hardware', priority: 'High' }).
+ * It sends the description to the script and gets back a predicted category and priority
+ * @param {string} description The ticket description text
+ * @returns {Promise<object>} A promise that resolves with the prediction (e.g., { category: 'Hardware', priority: 'High' })
  */
 function getTicketPrediction(description) {
     return new Promise((resolve, reject) => {
@@ -372,11 +362,11 @@ function getTicketPrediction(description) {
     });
 }
 
-// An endpoint for client agents to create a new support ticket.
+// An endpoint for client agents to create a new support ticket
 app.post('/api/tickets', requireApiKey, asyncHandler(async (req, res) => {
     const ticket = req.body || {};
     if (!ticket.subject || !ticket.description) {
-        return res.status(400).json({ error: 'subject and description are required' });
+        return res.status(400).json({ error: 'Subject and description are required' });
     }
 
     const prediction = await getTicketPrediction(ticket.description);
@@ -387,21 +377,21 @@ app.post('/api/tickets', requireApiKey, asyncHandler(async (req, res) => {
 
     await db.collection('tickets').insertOne(ticket);
     console.log('Received ticket with prediction:', ticket);
-    return res.status(201).json({ message: 'Ticket recorded with prediction.', ticket });
+    return res.status(201).json({ message: 'Ticket recorded with prediction', ticket });
 }));
 
-// --- Git collection endpoints ---
-// GET all git entries (public)
+// Git collection endpoints
+// GET all git entries
 app.get('/api/git', asyncHandler(async (req, res) => {
   const docs = await db.collection('git').find({}).sort({ seq: 1 }).toArray();
   res.json(docs);
 }));
 
-// POST add a new git entry { username, repo } (public)
+// POST add a new git entry { username, repo }
 // Also append "username:repos/repo.git" to /home/git/permissions.txt
 app.post('/api/git', asyncHandler(async (req, res) => {
   const { username, repo } = req.body || {};
-  if (!username || !repo) return res.status(400).json({ error: 'username and repo required' });
+  if (!username || !repo) return res.status(400).json({ error: 'Username and repo required' });
 
   // Auto-increment sequence in a counters collection
   const counter = await db.collection('counters').findOneAndUpdate(
@@ -415,7 +405,7 @@ app.post('/api/git', asyncHandler(async (req, res) => {
   const result = await db.collection('git').insertOne(doc);
   doc._id = result.insertedId;
 
-  // Update permissions file (best-effort)
+  // Update permissions file
   const permsPath = '/home/git/permissions.txt';
   const line = `${username}:repos/${repo}.git`;
   try {
@@ -431,9 +421,9 @@ app.post('/api/git', asyncHandler(async (req, res) => {
     if (!lines.includes(line)) {
       const toAppend = (current && !current.endsWith('\n')) ? '\n' + line + '\n' : line + '\n';
       await fsPromises.appendFile(permsPath, toAppend, 'utf8');
-      console.log(`Appended to permissions file: ${line}`);
+      console.log(`Appended to permissions file ${line}`);
     } else {
-      console.log(`Permissions file already contains line: ${line}`);
+      console.log(`Permissions file already contains ${line}`);
     }
   } catch (fileErr) {
     console.error('Failed to update permissions file:', fileErr);
@@ -448,7 +438,7 @@ app.post('/api/git', asyncHandler(async (req, res) => {
 app.delete('/api/git/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!ObjectId.isValid(id)) {
-    return res.status(400).json({ error: 'Invalid id format' });
+    return res.status(400).json({ error: 'Invalid ID format' });
   }
 
   // find document to know username/repo for permissions file removal
@@ -462,7 +452,7 @@ app.delete('/api/git/:id', asyncHandler(async (req, res) => {
     return res.status(404).json({ error: 'Git entry not found' });
   }
 
-  // Update permissions file (best-effort)
+  // Update permissions file
   const permsPath = '/home/git/permissions.txt';
   const targetLine = `${existing.username}:repos/${existing.repo}.git`;
   try {
@@ -481,28 +471,25 @@ app.delete('/api/git/:id', asyncHandler(async (req, res) => {
     const filtered = lines.filter(l => l.trim() !== targetLine);
     const newContent = filtered.length ? filtered.join('\n') + '\n' : '';
     await fsPromises.writeFile(permsPath, newContent, 'utf8');
-    console.log(`Removed line from permissions file if present: ${targetLine}`);
+    console.log(`Removed from permissions file ${targetLine}`);
   } catch (fileErr) {
     console.error('Failed to update permissions file after delete:', fileErr);
-    // do not fail the API call on file errors
   }
 
   res.status(204).send();
 }));
 
-// If any error occurs in an endpoint and isn't handled, it gets caught here. 
+// If any error occurs in an endpoint and isn't handled, it gets caught here.
 app.use((err, req, res, next) => {
     console.error(`Unhandled error on ${req.method} ${req.path}:`, err);
     // Avoid sending detailed error messages in production for security
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(500).json({ error: 'Internal server error' });
 });
-
-// --- Server Startup ---
 
 const startServer = async () => {
     await connectToDatabase();
     
-    // --- Background Job: Server-side Inactivity Check ---
+    // Server-side inactivity check in background
     setInterval(async () => {
         if (!db) return;
         const cutoff = new Date(Date.now() - INACTIVITY_LIMIT_MS).toISOString();
@@ -512,15 +499,14 @@ const startServer = async () => {
                 { $set: { status: 'INACTIVE' } }
             );
             if (result.modifiedCount > 0) {
-                console.log(`[SECURITY] Server marked ${result.modifiedCount} devices as INACTIVE due to inactivity.`);
+                console.log(`ALERT: Marked ${result.modifiedCount} devices as INACTIVE due to inactivity`);
             }
         } catch (e) { console.error(e); }
     }, 60 * 1000);
 
-    // Creates and starts the HTTP server on port 3000.
+    // Creates and starts the HTTP server on port 3000
     const server = http.createServer(app).listen(3000, '0.0.0.0', () => {
         console.log('HTTP Express server listening on port 3000');
-        // Logs the server's local network addresses for easy access during development.
         const interfaces = os.networkInterfaces();
         for (const name of Object.keys(interfaces)) {
             for (const net of interfaces[name]) {
@@ -532,19 +518,19 @@ const startServer = async () => {
     });
 
 
-// A function to gracefully shut down the server.
+// Gracefull shutdown on Ctrl+C
     const shutdown = (signal) => {
         console.log(`\n${signal} received. Shutting down gracefully...`);
         server.close(async () => {
-            console.log('HTTP server closed.');
+            console.log('HTTP server closed');
             await client.close();
-            console.log('MongoDB connection closed.');
+            console.log('MongoDB connection closed');
             process.exit(0);
         });
     };
 
     // Sets up listeners to trigger the shutdown function when the user presses Ctrl+C (SIGINT)
-    // or when the system requests termination (SIGTERM).
+    // or when the system requests termination (SIGTERM)
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
 };
