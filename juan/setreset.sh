@@ -1,46 +1,44 @@
 #!/bin/bash
+# Setup and reset script for client
 
-# =================================================================
-# CDCS: Unified Governance & Resilience Module
-# Features: Auto-Dependency, Root NodeJS, Unified Service, Password Fix
-# =================================================================
+# Configure variables below
+EMPLOYEE_PASSWORD="employee123"
 
 if [[ $EUID -ne 0 ]]; then
-   echo "CRITICAL ERROR: This script must be run with sudo."
+   echo "ERROR: Script must be run with sudo"
    exit 1
 fi
 
-# DYNAMIC IDENTITY DETECTION
+# Get the username who started this script
 REAL_USER=$(logname 2>/dev/null || echo $SUDO_USER)
 
-# =================================================================
-# VAULT SETUP
-# =================================================================
+# Root vault setup
+
 VAULT_ROOT="/root/cdcs"
-VAULT_JUAN="$VAULT_ROOT/juan"
 CURRENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ "$CURRENT_DIR" != "$VAULT_JUAN" ]; then
-    echo "[STAGING] Moving project into the protected /root Vault..."
+# If script is not run from /root
+if [ "$CURRENT_DIR" != "$VAULT_ROOT/juan" ]; then
+    echo "Moving project into the protected /root vault..."
     mkdir -p "$VAULT_ROOT"
     cp -r "$CURRENT_DIR/.."/* "$VAULT_ROOT/"
-    chmod +x "$VAULT_JUAN/setreset.sh"
-    exec "$VAULT_JUAN/setreset.sh" "$@"
+    # Restart the script from within root
+    chmod +x "$VAULT_ROOT/juan/setreset.sh"
+    exec "$VAULT_ROOT/juan/setreset.sh" "$@"
 fi
 
+# Set working directory
 cd "$(dirname "$0")"
+# Exit the script immediately if any command fails
 set -e
 
-# =================================================================
-# INSTALL NODE / NVM AS ROOT
-# =================================================================
-install_node_for_root() {
-    ROOT_HOME="/root"
-    echo "--- INSTALLING NVM/Node FOR ROOT ---"
+# Install NVM for root
 
-    export NVM_DIR="$ROOT_HOME/.nvm"
+install_node_for_root() {
+    export NVM_DIR="/root/.nvm"
     if [ ! -s "$NVM_DIR/nvm.sh" ]; then
         echo "Installing NVM for root..."
+        # NOTE: Update with latest NVM release script
         curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
     fi
 
@@ -53,91 +51,78 @@ install_node_for_root() {
     echo "Node version: $(node --version)"
 }
 
-# =================================================================
-# SETUP FUNCTION
-# =================================================================
+# Setup function
+
 setup_all() {
-    echo "--- PHASE 0: STATUS CHECK ---"
+    echo "Status check in progress..."
     if systemctl is-active --quiet cdcs.service && [ -d "$VAULT_ROOT" ]; then
-        echo "******************************************"
-        echo "* [INFO] CDCS SETUP IS ALREADY COMPLETE  *"
-        echo "******************************************"
-        read -p "Force re-sync dependencies? (y/N): " confirm
+        echo "ALERT: Setup is already complete"
+        read -p "Re-run setup? (y/N): " confirm
         if [[ $confirm != [yY] ]]; then
-            echo "Exiting setup. No changes made."
+            echo "Exiting setup"
             exit 0
         fi
     fi
 
-    # -----------------------------------------------------------------
-    # PHASE 1: PRE-FLIGHT TOOLS
-    # -----------------------------------------------------------------
-    echo "--- CHECKING REQUIRED TOOLS ---"
+    echo "Setting up software..."
+    # Install Git
     if ! command -v git &>/dev/null; then
         apt-get update && apt-get install -y git
     fi
 
+    # Setup MongoDB repo
     if ! command -v google-chrome &>/dev/null; then
         wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/trusted.gpg.d/google-chrome.gpg
         echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-        apt-get update && apt-get install -y google-chrome-stable
+        apt-get update
     fi
 
+    # Setup Google Chrome repo
     if ! command -v mongod &>/dev/null; then
         curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
         echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-7.0.list
-        apt-get update && apt-get install -y mongodb-org
-        systemctl enable --now mongod
+        apt-get update
     fi
 
-    # -----------------------------------------------------------------
-    # PHASE 2: USER PROVISIONING
-    # -----------------------------------------------------------------
-    echo "Promoting '$REAL_USER' to CDCS Admin..."
+    echo "Promoting '$REAL_USER' to admin..."
     usermod -aG sudo "$REAL_USER"
     echo "${REAL_USER}:admin123" | chpasswd
-    echo "Admin '$REAL_USER' password set to: admin123"
+    echo "NOTE: Admin '$REAL_USER' password set to admin123"
 
     if ! id "cdcs_employee" &>/dev/null; then
         useradd -m -s /bin/bash cdcs_employee
         echo "User 'cdcs_employee' created."
     fi
-    echo "cdcs_employee:employee123" | chpasswd
+    echo "cdcs_employee:$EMPLOYEE_PASSWORD" | chpasswd
+    echo "NOTE: 'cdcs_employee' password set to $EMPLOYEE_PASSWORD"
 
-    # -----------------------------------------------------------------
-    # PHASE 3: SECURITY HARDENING
-    # -----------------------------------------------------------------
+    # Setup fail2ban
     apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
-    # -----------------------------------------------------------------
-    # PHASE 4: INSTALL NODE/NVM
-    # -----------------------------------------------------------------
+    # Call NVM install function
     install_node_for_root
 
     export NVM_DIR="/root/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-    # -----------------------------------------------------------------
-    # PHASE 5: DEPENDENCY INSTALL
-    # -----------------------------------------------------------------
-    echo "--- INSTALLING DERIL DEPENDENCIES ---"
+    echo "Installing client backend dependencies..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
 
     if [ -d "$VAULT_ROOT/evana/client_frontend" ]; then
-        echo "--- INSTALLING EVANA FRONTEND ---"
+        echo "Installing client frontend dependencies..."
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
-    # -----------------------------------------------------------------
-    # PHASE 6: CREATE RUNNER SCRIPT (FRONTEND + BACKEND)
-    # -----------------------------------------------------------------
+    # Create script called by SystemD service
+
     RUNNER_SCRIPT="$VAULT_ROOT/run_cdcs.sh"
 
     tee "$RUNNER_SCRIPT" > /dev/null <<'EOF'
 #!/bin/bash
+
 export NVM_DIR="/root/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
@@ -158,12 +143,11 @@ EOF
 
     chmod +x "$RUNNER_SCRIPT"
 
-    # -----------------------------------------------------------------
-    # PHASE 7: CREATE/UPDATE SYSTEMD SERVICE
-    # -----------------------------------------------------------------
+    # Create SystemD service
+
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
-Description=CDCS Unified Governance Agent
+Description=CDCS Client Service
 After=network.target
 
 [Service]
@@ -181,35 +165,32 @@ EOF
     systemctl enable cdcs.service
     systemctl restart cdcs.service
 
-    # -----------------------------------------------------------------
-    # PHASE 8: CREATE DESKTOP LAUNCHER
-    # -----------------------------------------------------------------
+    # Create desktop launcher
+
     DESKTOP_DIR="/home/cdcs_employee/Desktop"
     mkdir -p "$DESKTOP_DIR"
 
-    tee "$DESKTOP_DIR/CDCS-App.desktop" > /dev/null <<EOF
+    tee "$DESKTOP_DIR/cdcs-portal.desktop" > /dev/null <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=CDCS Client App
-Exec=google-chrome http://localhost:5173
-Icon=google-chrome
+Name=CDCS Client Portal
+Exec=firefox http://localhost:5173
+Icon=firefox
 Terminal=false
-Categories=Development;
+Categories=Office;
 EOF
 
-    chmod +x "$DESKTOP_DIR/CDCS-App.desktop"
-    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/CDCS-App.desktop"
-    sudo -u cdcs_employee gio set "$DESKTOP_DIR/CDCS-App.desktop" metadata::trusted true || true
+    chmod +x "$DESKTOP_DIR/cdcs-portal.desktop"
+    chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/cdcs-portal.desktop"
+    sudo -u cdcs_employee gio set "$DESKTOP_DIR/cdcs-portal.desktop" metadata::trusted true || true
 
-    # -----------------------------------------------------------------
-    # PHASE 9: LOCKDOWN VAULT
-    # -----------------------------------------------------------------
+    # Lockdown vault permissions
+
     chown root:root -R "$VAULT_ROOT"
     chmod 700 "$VAULT_ROOT"
 
-    echo "--- [SUCCESS] CDCS SETUP COMPLETE ---"
-    echo "Total Users Managed: 2 ($REAL_USER & cdcs_employee)"
+    echo "ALERT: Setup has completed successfully"
 }
 
 # =================================================================
@@ -235,11 +216,8 @@ reset_all() {
     echo "* RESET COMPLETE: GOLDEN BASELINE RESTORED *"
 }
 
-# =================================================================
-# SCRIPT ENTRY
-# =================================================================
 case "$1" in
     setup) setup_all ;;
     reset) reset_all ;;
-    *) echo "Usage: sudo ./setreset.sh {setup|reset}" ;;
+    *) echo "ERROR: Script must be run as 'sudo ./setreset.sh {setup|reset}'" ;;
 esac

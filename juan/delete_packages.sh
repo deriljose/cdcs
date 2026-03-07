@@ -19,10 +19,10 @@ for pkg in "${PACKAGES[@]}"; do
 done
 
 if $DRY_RUN; then
-    echo "Dry run: no packages removed."
+    echo "DRY RUN: No packages removed"
 else
     echo "Deleting packages..."
     apt-get remove --purge -y "${PACKAGES[@]}"
     apt-get autoremove -y
-    echo "Deletion completed."
+    echo "Deletion completed"
 fi
