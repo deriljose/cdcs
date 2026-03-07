@@ -84,6 +84,20 @@ setup_all() {
         apt-get update
     fi
 
+    # Setup VS Code repo
+    if ! command -v code &>/dev/null; then
+        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft.gpg
+        cat > /etc/apt/sources.list.d/vscode.sources <<EOF
+Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64,arm64,armhf
+Signed-By: /usr/share/keyrings/microsoft.gpg
+EOF
+        apt-get update
+    fi
+
     echo "Promoting '$REAL_USER' to admin..."
     usermod -aG sudo "$REAL_USER"
     echo "${REAL_USER}:admin123" | chpasswd
