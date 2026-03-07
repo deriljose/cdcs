@@ -25,9 +25,9 @@ const DownloadPage = () => {
                 const clientAgentBase = `http://localhost:4001`;
                 const agentEndpoint = `${clientAgentBase}/api/available-packages`;
 
-                // Fetch list of available packages from the client agent.
+                // Fetch list of available packages from the client agent
                 // The agent is responsible for getting the master list and filtering
-                // out packages that are already installed.
+                // out packages that are already installed
                 const agentRes = await fetch(agentEndpoint);
                 if (!agentRes.ok) {
                     const errorText = await agentRes.text();
@@ -38,7 +38,7 @@ const DownloadPage = () => {
                 // The agent now returns the full package objects that are available for download
                 setPackages(agentData.packages || []);
             } catch (err) {
-                setError(err.message || "Client likely not running or CORS issue. Please ensure the client service is active.");
+                setError("Client likely not running or CORS issue");
             } finally {
                 setLoading(false);
             }
@@ -50,7 +50,7 @@ const DownloadPage = () => {
     const installPackage = async (pkg) => {
         // Prevent starting installation if another package is being installed
         if (installing) {
-            window.alert(`Currently installing ${installing}`);
+            window.alert(`Currently installing ${installing}...`);
             return;
         }
 
@@ -71,10 +71,10 @@ const DownloadPage = () => {
             });
 
             await res.json().catch(() => ({}));
-            window.alert(`Completed installing ${pkg.name}`);
+            window.alert(`Completed installing ${pkg.name}.`);
             window.location.reload();
         } catch (e) {
-            setError(`Failed to send installation request: ${e.message}`);
+            setError(`Failed to send installation request`);
         } finally {
             setInstalling(null);
         }
@@ -107,7 +107,7 @@ const DownloadPage = () => {
 
             window.alert("System update completed successfully.");
         } catch (e) {
-            setError(`System update failed: ${e.message}`);
+            setError(`System update failed`);
         } finally {
             setUpdating(false);
         }
@@ -118,7 +118,7 @@ const DownloadPage = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <div>
                     <h1 className="page-title">Downloads</h1>
-                    <p className="page-subtitle">Packages available for download</p>
+                    <p className="page-subtitle">Packages available for download. If a package you need is not listed, please raise a ticket.</p>
                 </div>
                 <button 
                     className="request-button" 
@@ -127,7 +127,7 @@ const DownloadPage = () => {
                     style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                 >
                     <RefreshCw size={18} className={updating ? "spin" : ""} />
-                    {updating ? 'Updating...' : 'Update System'}
+                    {updating ? 'Updating...' : 'Update system'}
                 </button>
             </div>
 

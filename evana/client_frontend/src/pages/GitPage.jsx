@@ -19,7 +19,7 @@ export default function GitPage() {
           setError(null);
         }
       } catch (e) {
-        if (mounted) setError(e.message || "Failed to load repos");
+        if (mounted) setError("Client likely not running or CORS issue");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -29,23 +29,38 @@ export default function GitPage() {
   }, []);
 
   return (
-    <div className="p-10 flex-1">
-      <h1 className="text-4xl font-bold mb-2">Git Repositories</h1>
-      <p className="text-gray-500 mb-6">Repositories from the central server</p>
-
-      <div className="bg-white shadow rounded-xl p-4">
-        {loading && <p className="text-gray-700">Loading...</p>}
-        {error && <p className="text-red-600">Error: {error}</p>}
-        {!loading && !error && (
-          repos.length ? (
-            <ul>
-              {repos.map((r, i) => <li key={i} className="py-2 border-b">{r}</li>)}
-            </ul>
-          ) : (
-            <p className="text-gray-500">No repositories found.</p>
-          )
-        )}
+    <div className="download-page">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h1 className="page-title">Git</h1>
+          <p className="page-subtitle">
+            Repositories you have access to. If a repo you need is not listed, please raise a ticket.
+          </p>
+        </div>
       </div>
+
+      {loading && <p>Loading repositories…</p>}
+      {error && <p className="error">Error: {error}</p>}
+
+      {!loading && !error && (
+        <div className="table-container">
+          <table className="packages-table">
+            <tbody>
+              {repos.length ? (
+                repos.map((repo, i) => (
+                  <tr key={i}>
+                    <td>{repo}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td>No repositories found.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import React, { useState } from "react";
+import { Send } from "lucide-react";
 import "./styles.css";
 
 const RaiseTicket = () => {
-  // States to track subject, description, sending status, and errors
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [sending, setSending] = useState(false);
@@ -11,66 +11,77 @@ const RaiseTicket = () => {
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
+
     if (!subject.trim() || !description.trim()) {
-      setError("Subject and description are required.");
+      setError("Subject and description are required");
       return;
     }
 
-    // Disable button when sending
     setSending(true);
 
     try {
       const res = await fetch("http://localhost:4001/api/ticket", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: subject.trim(), description: description.trim() }),
+        body: JSON.stringify({
+          subject: subject.trim(),
+          description: description.trim(),
+        }),
       });
 
       alert("Ticket submitted.");
       setSubject("");
       setDescription("");
     } catch (err) {
-      setError(err.message || String(err));
+      setError("Client likely not running or CORS issue");
     } finally {
       setSending(false);
     }
   };
 
   return (
-    <div className="p-10 flex-1">
-      <h1 className="text-4xl font-bold mb-2">Raise Ticket</h1>
-      <p className="text-gray-500 mb-6">Submit a technical support ticket</p>
+    <div className="download-page">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h1 className="page-title">Raise Ticket</h1>
+          <p className="page-subtitle">Submit a ticket if you're facing any technical issues.</p>
+        </div>
+      </div>
 
-      <div className="bg-white shadow rounded-xl p-6 w-full max-w-lg">
-        <form className="space-y-4" onSubmit={submit}>
-          <div>
-            <label className="block text-gray-700 font-medium mb-1">Subject</label>
+      <div className="table-container form-container">
+        <form className="ticket-form" onSubmit={submit}>
+          
+          <div className="form-group">
+            <label>Subject</label>
             <input
+              type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              type="text"
-              className="w-full border rounded-md p-2 focus:ring focus:ring-blue-200"
               placeholder="Enter subject"
             />
           </div>
-          <div>
-            <label className="block text-gray-700 font-medium mb-1">Description</label>
+
+          <div className="form-group">
+            <label>Description</label>
             <textarea
+              rows="4"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows="4"
-              className="w-full border rounded-md p-2 focus:ring focus:ring-blue-200"
               placeholder="Describe your issue"
             />
           </div>
-          {error && <p className="text-red-600">{error}</p>}
+
+          {error && <p className="error">Error: {error}</p>}
+
           <button
             type="submit"
             disabled={sending}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+            className="submit-button"
           >
-            {sending ? "Sending…" : "Submit Ticket"}
+            <Send size={16} />
+            {sending ? "Sending…" : "Submit"}
           </button>
+
         </form>
       </div>
     </div>
