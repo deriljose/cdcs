@@ -28,9 +28,9 @@ const Sidebar = () => {
           <span>Git</span>
         </NavLink>
 
-        <NavLink to="/raise-ticket" className={getNavLinkClass}>
+        <NavLink to="/tickets" className={getNavLinkClass}>
           <MessageSquare />
-          <span>Raise Ticket</span>
+          <span>Tickets</span>
         </NavLink>
       </nav>
     </aside>

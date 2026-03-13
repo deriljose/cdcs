@@ -26,9 +26,9 @@ const Sidebar = () => {
           <span>Employees</span>
         </NavLink>
 
-        <NavLink to="/support-tickets" className={getNavLinkClass}>
+        <NavLink to="/tickets" className={getNavLinkClass}>
           <MessageSquare />
-          <span>Support Tickets</span>
+          <span>Tickets</span>
         </NavLink>
 
         <NavLink to="/whitelist" className={getNavLinkClass}>

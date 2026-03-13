@@ -107,7 +107,7 @@ const DownloadPage = () => {
 
             window.alert("System update completed successfully.");
         } catch (e) {
-            setError(`System update failed`);
+            setError(`Failed to update system`);
         } finally {
             setUpdating(false);
         }
@@ -137,6 +137,12 @@ const DownloadPage = () => {
             {!loading && !error && (
                 <div className="table-container">
                     <table className="packages-table">
+                        <thead>
+                            <tr>
+                                <th>Package Name</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {packages.map((pkg) => (
                                 <tr key={pkg._id || pkg.id || pkg.file || pkg.name}>

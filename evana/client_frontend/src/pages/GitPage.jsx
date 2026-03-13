@@ -45,6 +45,11 @@ export default function GitPage() {
       {!loading && !error && (
         <div className="table-container">
           <table className="packages-table">
+            <thead>
+              <tr>
+                <th>Repository</th>
+              </tr>
+            </thead>
             <tbody>
               {repos.length ? (
                 repos.map((repo, i) => (

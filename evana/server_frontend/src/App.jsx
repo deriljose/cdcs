@@ -2,14 +2,14 @@ import React, { useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 
-import SupportTickets from "./pages/SupportTickets";
+import Tickets from "./pages/Tickets";
 import Employees from "./pages/Employees";
 import Whitelist from "./pages/Whitelist";
 import Git from "./pages/Git";
 import Logs from "./pages/Logs";
 import Flagged from "./pages/Flagged";
 
-import "./pages/App.css"; 
+import "./pages/App.css";
 
 const API_BASE = 'http://localhost:3000';
 
@@ -45,26 +45,26 @@ const App = () => {
 
   if (!token) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', fontFamily: 'sans-serif' }}>
-        <h1>Server Dashboard Login</h1>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '98vh', flexDirection: 'column', fontFamily: 'sans-serif' }}>
+        <h1 style={{ fontSize: '2.25rem', color: '#4f46e5' }}>Dashboard Login</h1>
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', width: '300px', gap: '10px' }}>
           <input 
             type="text" 
             placeholder="Username" 
             value={username} 
             onChange={e => setUsername(e.target.value)} 
-            style={{ padding: '8px' }}
+            style={{ padding: '8px', borderRadius: '0px', border: '1px solid #d1d5db' }}
           />
           <input 
             type="password" 
             placeholder="Password" 
             value={password} 
             onChange={e => setPassword(e.target.value)} 
-            style={{ padding: '8px' }}
+            style={{ padding: '8px', borderRadius: '0px', border: '1px solid #d1d5db' }}
           />
-          <button type="submit" style={{ padding: '10px', cursor: 'pointer' }}>Login</button>
+          <button type="submit" style={{ padding: '10px', cursor: 'pointer', borderRadius: '0px', border: 'none', color: '#ffffff', backgroundColor: '#4f46e5' }}>Login</button>
         </form>
-        {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
+        {error && <p style={{ color: 'red', marginTop: '20px' }}>{error}</p>}
       </div>
     );
   }
@@ -80,7 +80,7 @@ const App = () => {
             {/* serve Git UI at both paths so old links keep working */}
             <Route path="/alerts" element={<Git />} />
             <Route path="/git" element={<Git />} />
-            <Route path="/support-tickets" element={<SupportTickets />} />
+            <Route path="/tickets" element={<Tickets />} />
             <Route path="/whitelist" element={<Whitelist role={role} />} />
             <Route path="/flagged" element={<Flagged />} />
             <Route path="/logs" element={<Logs />} />

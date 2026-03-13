@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import "./Employees.css";
+import "./styles.css";
 
 const Logs = () => {
   const [logs, setLogs] = useState([]);
@@ -17,7 +17,7 @@ const Logs = () => {
           data.slice().sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
         setLogs(sorted);
       } catch (e) {
-        setError("Server likely not running");
+        setError("Server likely not running or CORS issue");
       } finally {
         setLoading(false);
       }
@@ -26,22 +26,25 @@ const Logs = () => {
     fetchLogs();
   }, []);
 
-  return (
-    <div className="p-10 flex-1">
-      <h1 className="text-4xl font-bold mb-2">Client Logs</h1>
-      <p className="text-gray-500 mb-6">Heartbeats and client check-ins</p>
+    return (
+      <div className="whitelist-container">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h1 className="page-title">Logs</h1>
+          <p className="page-subtitle">Logs of client heartbeats and check-ins.</p>
+        </div>
+      </div>
 
-      <div className="bg-white shadow rounded-xl p-6 w-full overflow-x-auto">
-        {loading && <p className="text-gray-700">Loading logs...</p>}
-        {error && <p className="text-red-600">Error: {error}</p>}
+      {loading && <p className="loading-message">Loading logs...</p>}
+      {error && <p className="error">Error: {error}</p>}
+      <div className="table-container">
         {!loading && !error && (
-          <table className="employees-table">
+          <table className="packages-table">
             <thead>
               <tr>
                 <th scope="col">Timestamp</th>
                 <th scope="col">Username</th>
                 <th scope="col">MAC Address</th>
-                <th scope="col">ID</th>
               </tr>
             </thead>
             <tbody>
@@ -50,7 +53,6 @@ const Logs = () => {
                   <td>{log.timestamp ? new Date(log.timestamp).toLocaleString() : "-"}</td>
                   <td>{log.username || "-"}</td>
                   <td>{log.mac_address || log.macAddress || "-"}</td>
-                  <td>{String(log._id)}</td>
                 </tr>
               ))}
             </tbody>

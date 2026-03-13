@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import "./Whitelist.css";
+import { Plus, Trash2 } from "lucide-react";
+import "./styles.css";
 
 const Whitelist = ({ role }) => {
   const [packages, setPackages] = useState([]);
@@ -14,7 +15,7 @@ const Whitelist = ({ role }) => {
         const data = await response.json();
         setPackages(data);
       } catch (e) {
-        setError("Server likely not running");
+        setError("Server likely not running or CORS issue");
       } finally {
         setLoading(false);
       }
@@ -29,11 +30,6 @@ const Whitelist = ({ role }) => {
     // Trim whitespace
     const trimmedName = newPackageName.trim();
 
-    if (!trimmedName) {
-      setError("Package name cannot be empty.");
-      return;
-    }
-
     try {
       const response = await fetch("/api/packages", {
         method: "POST",
@@ -41,12 +37,17 @@ const Whitelist = ({ role }) => {
         body: JSON.stringify({ name: trimmedName }),
       });
 
-      const newPackage = await response.json();
-      setPackages([newPackage, ...packages]); // Add to top of the list
-      setNewPackageName(""); // Clear input
-      setError(null); // Clear previous errors
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to add package");
+      }
+
+      setPackages((currentPackages) => [data, ...currentPackages]);
+      setNewPackageName("");
+      setError(null);
     } catch (err) {
-      setError("Failed to add package");
+      window.alert(err.message || "Failed to add package");
     }
   };
 
@@ -68,10 +69,12 @@ const Whitelist = ({ role }) => {
 
   return (
     <div className="whitelist-container">
-      <h1>Whitelist</h1>
-      <p className="page-description">
-        Packages allowed for download
-      </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h1 className="page-title">Whitelist</h1>
+          <p className="page-subtitle">Packages available for download.</p>
+        </div>
+      </div>
 
       {role === 'admin' && (
       <div className="form-card">
@@ -87,9 +90,10 @@ const Whitelist = ({ role }) => {
           />
           <button
             type="submit"
-            className="add-package-btn"
+            className="request-button"
             disabled={!newPackageName.trim()}
           >
+            <Plus size={16} />
             Add
           </button>
         </form>
@@ -98,9 +102,15 @@ const Whitelist = ({ role }) => {
 
       <div className="list-card">
         {loading && <p className="loading-message">Loading packages...</p>}
-        {error && <p className="error-message">Error: {error}</p>}
+        {error && <p className="error">Error: {error}</p>}
         {!loading && !error && (
           <table className="packages-table">
+            <thead>
+              <tr>
+                <th>Package Name</th>
+                <th>Action</th>
+              </tr>
+            </thead>
             <tbody>
               {packages.map((pkg) => (
                 <tr key={pkg._id}>
@@ -108,6 +118,7 @@ const Whitelist = ({ role }) => {
                   <td className="actions-cell">
                     {role === 'admin' && (
                     <button onClick={() => handleDeletePackage(pkg._id)} className="delete-btn">
+                      <Trash2 size={16} />
                       Delete
                     </button>
                     )}

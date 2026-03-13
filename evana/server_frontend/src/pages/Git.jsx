@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import './styles.css';
 
 export default function Git() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const load = async () => {
     setLoading(true);
     try {
+      setError(null);
       const res = await fetch('/api/git');
       const data = await res.json();
       setItems(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
       setItems([]);
+      setError('Server likely not running or CORS issue');
     } finally {
       setLoading(false);
     }
@@ -26,14 +31,19 @@ export default function Git() {
     const repo = window.prompt('Repo name:');
     if (!repo) return;
     try {
-      await fetch('/api/git', {
+      const res = await fetch('/api/git', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, repo })
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to add entry');
+      }
       load();
     } catch (e) {
       console.error(e);
+      window.alert(e.message || 'Failed to add entry');
     }
   };
 
@@ -42,39 +52,59 @@ export default function Git() {
     try {
       const res = await fetch(`/api/git/${id}`, { method: 'DELETE' });
       if (res.status === 204) load();
-      else console.error('Failed to delete', await res.json().catch(() => ({})));
+      else {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to delete entry');
+      }
     } catch (e) {
       console.error(e);
+      window.alert(e.message || 'Failed to delete entry');
     }
   };
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>Git entries</h2>
-        <button onClick={addItem}>Add</button>
+    <div className="whitelist-container">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div>
+          <h1 className="page-title">Git</h1>
+          <p className="page-subtitle">Repositories employees have access to.</p>
+        </div>
+        <button onClick={addItem} className="request-button">
+          <Plus size={16} />
+          Add
+        </button>
       </div>
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse', width: '100%' }}>
-          <thead>
-            <tr><th>Username</th><th>Repo</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            {items.map(it => (
-              <tr key={it._id || it.seq}>
-                <td>{it.username}</td>
-                <td>{it.repo}</td>
-                <td>
-                  <button onClick={() => deleteItem(it._id)}>Delete</button>
-                </td>
+      {loading && <p className="loading-message">Loading repositories...</p>}
+      {error && <p className="error">Error: {error}</p>}
+
+      <div className="table-container">
+        {!loading && !error && (
+          <table className="packages-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Repository</th>
+                <th>Action</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {items.map(it => (
+                <tr key={it._id || it.seq}>
+                  <td>{it.username}</td>
+                  <td>{it.repo}</td>
+                  <td className="actions-cell">
+                    <button onClick={() => deleteItem(it._id)} className="delete-btn">
+                      <Trash2 size={16} />
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
