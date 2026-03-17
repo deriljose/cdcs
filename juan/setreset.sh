@@ -54,6 +54,8 @@ install_node_for_root() {
 # Setup function
 
 setup_all() {
+    # PHASE 0: Status check. Check if setup has been completed before.
+    
     echo "Status check in progress..."
     if systemctl is-active --quiet cdcs.service && [ -d "$VAULT_ROOT" ]; then
         echo "ALERT: Setup is already complete"
@@ -63,6 +65,8 @@ setup_all() {
             exit 0
         fi
     fi
+
+    # PHASE 1: Repo setup. Add apt repositories for various software tools.
 
     echo "Setting up software..."
     # Install Git
@@ -98,6 +102,8 @@ EOF
         apt-get update
     fi
 
+    # PHASE 2: User provisioning. Set perms for current and employee user.
+    
     echo "Promoting '$REAL_USER' to admin..."
     usermod -aG sudo "$REAL_USER"
     echo "${REAL_USER}:admin123" | chpasswd
@@ -110,18 +116,24 @@ EOF
     echo "cdcs_employee:$EMPLOYEE_PASSWORD" | chpasswd
     echo "NOTE: 'cdcs_employee' password set to $EMPLOYEE_PASSWORD"
 
+    # PHASE 3: Security. Setup firewall.
+    
     # Setup fail2ban
     apt-get install -y ufw fail2ban
     ufw allow ssh
     ufw --force enable
     systemctl enable fail2ban && systemctl start fail2ban
 
+    # PHASE 4: Install Node.js via NVM
+    
     # Call NVM install function
     install_node_for_root
 
     export NVM_DIR="/root/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
+    # PHASE 5: Dependency installation for client
+    
     echo "Installing client backend dependencies..."
     npm install --prefix "$VAULT_ROOT/deril" --silent
 
@@ -130,8 +142,9 @@ EOF
         npm install --prefix "$VAULT_ROOT/evana/client_frontend" --silent
     fi
 
-    # Create script called by SystemD service
+    # PHASE 6: Setup runner script. Starts frontend and backend.
 
+    # Create script called by SystemD service
     RUNNER_SCRIPT="$VAULT_ROOT/run_cdcs.sh"
 
     tee "$RUNNER_SCRIPT" > /dev/null <<'EOF'
@@ -157,8 +170,9 @@ EOF
 
     chmod +x "$RUNNER_SCRIPT"
 
+    # PHASE 7: Setup background service. Ensures client is always running.
+    
     # Create SystemD service
-
     tee /etc/systemd/system/cdcs.service > /dev/null <<EOF
 [Unit]
 Description=CDCS Client Service
@@ -179,7 +193,7 @@ EOF
     systemctl enable cdcs.service
     systemctl restart cdcs.service
 
-    # Create desktop launcher
+    # PHASE 8: Create desktop launcher. Acccess frontend via .desktop file.
 
     DESKTOP_DIR="/home/cdcs_employee/Desktop"
     mkdir -p "$DESKTOP_DIR"
@@ -199,7 +213,7 @@ EOF
     chown cdcs_employee:cdcs_employee "$DESKTOP_DIR/cdcs-portal.desktop"
     sudo -u cdcs_employee gio set "$DESKTOP_DIR/cdcs-portal.desktop" metadata::trusted true || true
 
-    # Lockdown vault permissions
+    # PHASE 9: Lockdown vault permissions
 
     chown root:root -R "$VAULT_ROOT"
     chmod 700 "$VAULT_ROOT"
