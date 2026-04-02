@@ -221,31 +221,4 @@ EOF
     echo "ALERT: Setup has completed successfully"
 }
 
-# =================================================================
-# RESET FUNCTION
-# =================================================================
-reset_all() {
-    echo "--- INITIATING SYSTEM RESET ---"
-
-    echo "[1/4] Terminating 'cdcs' user processes..."
-    pkill -u cdcs || true
-    sleep 2
-
-    echo "[2/4] Sanitizing 'cdcs' workspace..."
-    find /home/cdcs -mindepth 1 -not -path '*/.nvm*' -delete
-    mkdir -p /home/cdcs/{Desktop,Documents,Downloads,Pictures}
-    chown -R cdcs:cdcs /home/cdcs
-
-    echo "[3/4] Resetting 'cdcs' credentials..."
-    echo "cdcs:employee123" | chpasswd
-
-    echo "[4/4] Restarting Governance Agent..."
-    systemctl restart cdcs.service
-    echo "* RESET COMPLETE: GOLDEN BASELINE RESTORED *"
-}
-
-case "$1" in
-    setup) setup_all ;;
-    reset) reset_all ;;
-    *) echo "ERROR: Script must be run as 'sudo ./setreset.sh {setup|reset}'" ;;
-esac
+setup_all
