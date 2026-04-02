@@ -329,7 +329,14 @@ const pythonScript = path.join(__dirname, '../suhail/predict_ticket.py');
  */
 function getTicketPrediction(description) {
     return new Promise((resolve, reject) => {
-        const pyProcess = spawn('python3', [pythonScript]);
+        const pyProcess = spawn(
+        'python3',
+        [pythonScript],
+        {
+            uid: 1000,
+            gid: 1000,
+        }
+        );
         let pyOutput = '';
         let pyError = '';
 
