@@ -329,14 +329,28 @@ const pythonScript = path.join(__dirname, '../suhail/predict_ticket.py');
  */
 function getTicketPrediction(description) {
     return new Promise((resolve, reject) => {
-        const pyProcess = spawn(
-        'python3',
-        [pythonScript],
-        {
-            uid: 1000,
-            gid: 1000,
+        // Determine a safe non-root user to run the Python script as.
+        // Prefer the original sudo caller (SUDO_USER), then USER, then fallback to 'nobody'.
+        const targetUser = process.env.SUDO_USER || process.env.USER || 'nobody';
+        const runningAsRoot = (process.getuid && process.getuid() === 0);
+
+        let pyProcess;
+        try {
+            if (runningAsRoot && targetUser && targetUser !== 'root') {
+                // When the Node process is running as root (e.g., via sudo), spawn the Python
+                // process under the original user to avoid running the script as root.
+                pyProcess = spawn('sudo', ['-u', targetUser, 'python3', pythonScript], { stdio: ['pipe', 'pipe', 'pipe'] });
+                console.log(`Spawning prediction script as user '${targetUser}' (dropped from root)`);
+            } else {
+                // Normal spawn when not running as root
+                pyProcess = spawn('python3', [pythonScript], { stdio: ['pipe', 'pipe', 'pipe'] });
+                console.log('Spawning prediction script with current user');
+            }
+        } catch (spawnErr) {
+            console.error('Failed to spawn Python process:', spawnErr);
+            return reject(spawnErr);
         }
-        );
+
         let pyOutput = '';
         let pyError = '';
 
@@ -364,8 +378,12 @@ function getTicketPrediction(description) {
             reject(spawnError);
         });
 
-        pyProcess.stdin.write(description + '\n');
-        pyProcess.stdin.end();
+        try {
+            pyProcess.stdin.write(description + '\n');
+            pyProcess.stdin.end();
+        } catch (ioErr) {
+            console.error('Failed to write to Python stdin:', ioErr);
+        }
     });
 }
 
