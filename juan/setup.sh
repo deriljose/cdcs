@@ -23,8 +23,8 @@ if [ "$CURRENT_DIR" != "$VAULT_ROOT/juan" ]; then
     mkdir -p "$VAULT_ROOT"
     cp -r "$CURRENT_DIR/.."/* "$VAULT_ROOT/"
     # Restart the script from within root
-    chmod +x "$VAULT_ROOT/juan/setreset.sh"
-    exec "$VAULT_ROOT/juan/setreset.sh" "$@"
+    chmod +x "$VAULT_ROOT/juan/setup.sh"
+    exec "$VAULT_ROOT/juan/setup.sh" "$@"
 fi
 
 # Set working directory
