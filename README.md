@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-`node.js`, `npm`, `python3` and `pip` need to be installed.
+`node.js`, `npm`, `python3` and `pip` need to be installed. Server needs Python modules `joblib` and `sklearn`.
 
 Ensure that `.env`, `server.cert` and `server.key` are present in the folder `deril`. `.env` should contain
 
@@ -143,10 +143,10 @@ sudo chmod +x /home/git/check-access.sh
 In the file `/home/git/.ssh/authorized_keys`, add
 
 ```
-command="/home/git/check-access.sh client_a",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty [PUBLIC_KEY]
+command="/home/git/check-access.sh client_name",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty [PUBLIC_KEY]
 ```
 
-where `[PUBLIC_KEY]` is the key from above.
+where `[PUBLIC_KEY]` is the key from above, and `client_name` is the name of the client to map the key to.
 
 ### Repo operations
 
@@ -154,4 +154,10 @@ On the client, clone a repo with
 
 ```bash
 GIT_SSH_COMMAND="ssh -i ~/.ssh/git_key" git clone git@[SERVER_IP]:repos/repo.git
+```
+
+Push with
+
+```bash
+GIT_SSH_COMMAND="ssh -i ~/.ssh/git_key" git push
 ```

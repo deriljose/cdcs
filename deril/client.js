@@ -27,6 +27,11 @@ const AGENT_API_KEY = process.env.CLIENT_API_KEY;
 const NON_ROOT_USER = process.env.NON_ROOT_USER || 'cdcs_employee';
 const RESET_WATCH_INTERVAL_MS = 15 * 1000; // poll every 15s
 
+// Track an in-progress password reset so we don't re-trigger it every heartbeat.
+let resetWatcherIntervalId = null;
+let resetWatcherUser = null;
+let resetWatcherBaseline = null;
+
 // --- Security State ---
 let lastServerContact = Date.now();
 
@@ -197,25 +202,51 @@ const performPackageCheck = async () => {
                     }
                 };
 
-                const getLastPasswordChange = (user) => {
+                // Locale-independent password change detection.
+                // Reads the 3rd field (lastchg) from shadow: days since epoch.
+                const getShadowLastChangeDays = (user) => {
                     try {
-                        const out = execSync(`chage -l ${user}`, { encoding: 'utf8' });
-                        const m = out.match(/^Last password change\\s*:\\s*(.+)$/m);
-                        return m ? m[1].trim() : null; // e.g., "Jun 10, 2024"
+                        const out = execSync(`getent shadow ${user}`, { encoding: 'utf8' }).trim();
+                        if (!out) return null;
+                        const parts = out.split(':');
+                        if (parts.length < 3) return null;
+                        const rawLastchg = parts[2];
+                        if (rawLastchg === undefined || rawLastchg === null || rawLastchg === '') return null;
+                        const lastchg = Number(rawLastchg);
+                        return Number.isFinite(lastchg) ? lastchg : null;
                     } catch (err) {
                         return null;
                     }
                 };
 
-                const watchForPasswordChange = (user, baseline, onChanged) => {
-                    const iv = setInterval(() => {
-                        const cur = getLastPasswordChange(user);
-                        if (cur && baseline && cur !== baseline && cur.toLowerCase() !== 'never') {
-                            clearInterval(iv);
-                            onChanged().catch(e => console.error('watchForPasswordChange onChanged error:', e));
+                const startPasswordResetWatcher = (user, onChanged) => {
+                    // If already watching, don't start a second interval.
+                    if (resetWatcherIntervalId && resetWatcherUser === user) return;
+
+                    // Clear any stale watcher.
+                    if (resetWatcherIntervalId) {
+                        clearInterval(resetWatcherIntervalId);
+                        resetWatcherIntervalId = null;
+                    }
+
+                    resetWatcherUser = user;
+                    resetWatcherBaseline = getShadowLastChangeDays(user);
+
+                    resetWatcherIntervalId = setInterval(() => {
+                        const cur = getShadowLastChangeDays(user);
+                        // When we force a reset with `chage -d 0`, baseline will typically be 0.
+                        // After the user changes their password, it will become a non-zero current day.
+                        if (
+                            cur !== null &&
+                            resetWatcherBaseline !== null &&
+                            cur !== resetWatcherBaseline &&
+                            cur > 0
+                        ) {
+                            clearInterval(resetWatcherIntervalId);
+                            resetWatcherIntervalId = null;
+                            onChanged().catch(e => console.error('startPasswordResetWatcher onChanged error:', e));
                         }
                     }, RESET_WATCH_INTERVAL_MS);
-                    return iv;
                 };
 
                 if (res.command === 'LOCKDOWN') {
@@ -237,15 +268,20 @@ const performPackageCheck = async () => {
                     await setEmployeeStatus('LOCKED');
                 } else if (res.command === 'RESET_PASSWORD') {
                     console.log('Received RESET_PASSWORD command for', targetUser);
-                    try { execSync(`usermod -U ${targetUser}`); } catch(e){ console.error('usermod -U failed:', e.message); }
-                    try { execSync(`chage -d 0 ${targetUser}`); } catch(e){ console.error('chage -d 0 failed:', e.message); }
+
+                    // If we're already waiting for this reset to complete, don't re-run `chage -d 0`
+                    // on every heartbeat; just keep watching and re-notify the server when complete.
+                    const alreadyWatching = resetWatcherIntervalId && resetWatcherUser === targetUser;
+                    if (!alreadyWatching) {
+                        try { execSync(`usermod -U ${targetUser}`); } catch (e) { console.error('usermod -U failed:', e.message); }
+                        try { execSync(`chage -d 0 ${targetUser}`); } catch (e) { console.error('chage -d 0 failed:', e.message); }
+                    }
 
                     // mark as waiting for reset locally
                     await setEmployeeStatus('RESET_WAIT');
 
                     // watch for the user actually changing their password before notifying server
-                    const baseline = getLastPasswordChange(targetUser);
-                    watchForPasswordChange(targetUser, baseline, async () => {
+                    startPasswordResetWatcher(targetUser, async () => {
                         console.log(`Detected password change for ${targetUser}. Marking ACTIVE.`);
                         await setEmployeeStatus('ACTIVE');
                         try {
